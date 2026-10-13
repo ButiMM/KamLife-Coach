@@ -213,7 +213,21 @@ REAL("\n4. THE REAL JOB OWNERS SELECT THEIR OWN TEMPLATE — not just sendWhatsA
   await pool.query("DELETE FROM sent_proactive WHERE user_id = $1", [user.id]).catch(() => {});
   // One scheduled message a day (#511): the morning above used today's slot, in memory as well as in the table.
   { const { dailyProactiveCount, weeklyKeyedSent } = await import("../server/scheduler/shared"); dailyProactiveCount.clear(); weeklyKeyedSent.clear(); }
+  // B4: THE WEEK'S NUMBERS ADD UP, from the ledger by SAST day. Four days of meals (two near the 120g protein target),
+  // two step reports on one day (3,000 at lunch, 9,000 by bed) and one on another (8,000).
+  await pool.query("UPDATE users SET protein_target = 120, steps_target = 8000 WHERE id = $1", [user.id]);
+  for (const t of ["meal_logs", "step_logs", "chat_history"]) await pool.query(`DELETE FROM ${t} WHERE user_id = $1`, [user.id]);
+  const at = (daysBack: number, hour: number) => `(date_trunc('day', now() AT TIME ZONE 'Africa/Johannesburg') - make_interval(days => ${daysBack}) + make_interval(hours => ${hour})) AT TIME ZONE 'Africa/Johannesburg'`;
+  for (const [d, protein, raw] of [[1, 130, "chicken and rice"], [2, 125, "eggs and pap"], [3, 40, "kfc streetwise"], [4, 30, "bread"]] as const) {
+    await pool.query(`INSERT INTO meal_logs (user_id, raw_message, source, kcal_int, protein_int, logged_at) VALUES ($1, $2, 'text', 600, $3, ${at(d, 13)})`, [user.id, raw, protein]);
+    await pool.query(`INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at) VALUES ($1, $2, 'ok', 'FOOD_LOG', ${at(d, 13)})`, [user.id, raw]);
+  }
+  for (const [d, h, steps] of [[1, 12, 3000], [1, 21, 9000], [2, 21, 8000]] as const)
+    await pool.query(`INSERT INTO step_logs (user_id, steps, logged_at) VALUES ($1, $2, ${at(d, h)})`, [user.id, steps]);
   await runSundayWeeklyReport().catch((e) => REAL(`  (weekly job threw: ${(e as any)?.message})`));
+  const report = payloads.filter(p => typeof p.body === "string" && p.to === phone).map(p => String(p.body)).join("\n");
+  chk(/Food: 4\/7 days logged/.test(report) && /Protein near target: 2 of 4 logged days/.test(report) && /Training: 4\//.test(report) && /8,500 avg/.test(report),
+    "the weekly report's numbers come from the ledger by SAST day: 4 food days, 2 near protein, 4 sessions, 8,500 steps a day (B4)", report.slice(0, 400));
   chk(bodiesSent() > 0, "the weekly job reached this client at all", `freeform attempts: ${bodiesSent()}`);
   chk(sidsSent().includes(SID.weekly),
     "runSundayWeeklyReport() sends the WEEKLY template when the window is closed",

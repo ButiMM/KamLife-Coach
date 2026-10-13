@@ -6,6 +6,7 @@ import {
   thisWeekUTC,
 } from "../shared";
 import { getGoalProfile } from "../../goal-profiles";
+import { sastDayKey } from "../../sast";
 import { suggestStepTargetAdjustment } from "../../targets";
 import { getTrajectoryForUser } from "../../trajectory-report";
 import { generateMealPlan } from "../../meal-plan";
@@ -60,7 +61,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       });
       const foodDaysFrom = (rows: typeof chats) => new Set(
         rows.filter(c => c.intent === "FOOD_LOG" && c.createdAt)
-          .map(c => new Date(c.createdAt!).toDateString()),
+          .map(c => sastDayKey(new Date(c.createdAt!))),
       ).size;
 
       if (chats.length === 0) {
@@ -73,7 +74,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
         }
         continue;
       }
-      const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
+      const daysWithLogs = new Set(chats.map(c => sastDayKey(new Date(c.createdAt!)))).size; // SAST days (B4: a 23:30 meal is that day's)
       if (daysWithLogs < 3) {
         const thin = await canonicalNextMove(client);
         // THE WEEK BY NAME (B4, replay gate): what they actually ate, from the meal rows, and one small focus when
@@ -90,7 +91,6 @@ export async function runSundayWeeklyReport(): Promise<void> {
         continue;
       }
 
-      const foodLogs = chats.filter(c => c.intent === "FOOD_LOG");
       const plannedSessions = client.trainingDaysPerWeek || 3;
       const completedSessions = workoutEntries.length;
       const weekNum = client.programmeWeek || 1;
@@ -116,9 +116,10 @@ export async function runSundayWeeklyReport(): Promise<void> {
       }
 
       let stepsLine = "", stepsEmoji = "👟";
-      const avgSteps = stepEntries.length > 0
-        ? Math.round(stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length)
-        : 0;
+      // ONE NUMBER PER DAY (B4): "3,000 by lunch" and "9,000 by bed" are one day of 9,000, not two days averaging 6,000.
+      const stepDays = new Map<string, number>();
+      for (const l of stepEntries) { const k = sastDayKey(new Date(l.loggedAt!)); stepDays.set(k, Math.max(stepDays.get(k) || 0, l.steps || 0)); }
+      const avgSteps = stepDays.size > 0 ? Math.round([...stepDays.values()].reduce((a, b) => a + b, 0) / stepDays.size) : 0;
       if (stepEntries.length > 0) {
         const pct = Math.round((avgSteps / stepsTarget) * 100);
         stepsEmoji = pct >= 100 ? "✅" : pct >= 75 ? "👟" : "⚠️";
@@ -128,12 +129,18 @@ export async function runSundayWeeklyReport(): Promise<void> {
       }
       // Right-size the step goal to reality — the "50% can't walk 10k" plan. Only a
       // SUGGESTION with a one-tap button; the client stays in control (targets.ts).
-      const stepAdj = suggestStepTargetAdjustment(stepsTarget, avgSteps, stepEntries.length);
+      const stepAdj = suggestStepTargetAdjustment(stepsTarget, avgSteps, stepDays.size);
 
-      const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey", "mince", "biltong", "sardines", "lentils"];
       const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "cool drink", "alcohol", "beer", "wine", "spur", "steers", "wimpy", "debonairs", "red bull", "monster energy", "energy drink", "fanta", "coke", "sprite", "fizzy drink", "oros"];
-      const foodDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
-      const proteinDays = new Set(foodLogs.filter(l => PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w))).map(c => new Date(c.createdAt!).toDateString())).size;
+      // FROM THE LEDGER, BY SAST DAY (B4). Food days and protein came from chat intents and keywords ("eggs" in the
+      // message), so a front-door meal could count as no food, and "Protein days: 2/3 meals" divided days by days.
+      // A protein day is a logged day whose protein reached 80% of their target.
+      const weekRows = await db.select({ at: mealLogs.loggedAt, protein: mealLogs.proteinInt, raw: mealLogs.rawMessage })
+        .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo)));
+      const proteinByDay = new Map<string, number>();
+      for (const r of weekRows) { const k = sastDayKey(new Date(r.at!)); proteinByDay.set(k, (proteinByDay.get(k) || 0) + (r.protein || 0)); }
+      const foodDays = proteinByDay.size;
+      const proteinDays = [...proteinByDay.values()].filter(g => g >= proteinTarget * 0.8).length;
       const proteinHitRate = foodDays > 0 ? Math.round((proteinDays / foodDays) * 100) : 0;
       const proteinEmoji = proteinHitRate >= 80 ? "✅" : proteinHitRate >= 50 ? "⚠️" : "❌";
       const trainPct = Math.round((completedSessions / plannedSessions) * 100);
@@ -142,7 +149,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const streakLine = streak > 0 ? `🔥 ${streak}-session streak` : "";
       const totalSessions = client.totalWorkoutsCompleted || 0;
       const milestoneLine = totalSessions > 0 && totalSessions % 10 === 0 ? `🏆 ${totalSessions} total sessions — milestone` : "";
-      const junkCount = foodLogs.filter(l => JUNK.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
+      const junkCount = weekRows.filter(r => JUNK.some(w => (r.raw || "").toLowerCase().includes(w))).length;
       const noProteinDays = foodDays - proteinDays;
       const clientGoalWeekly = client.goalType || "fat_loss";
       const isMuscleGainWeekly = clientGoalWeekly === "muscle_gain";
@@ -161,14 +168,14 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const observation = junkCount >= 3
         ? `Takeaways & cooldrinks showed up ${junkCount}x this week.`
         : noProteinDays >= 3
-        ? `${noProteinDays} day${noProteinDays !== 1 ? "s" : ""} this week without protein logged.`
+        ? `${noProteinDays} logged day${noProteinDays !== 1 ? "s" : ""} this week short of your protein.`
         : "";
       const move = await canonicalNextMove(client);
 
       const logScore = Math.round((daysWithLogs / 7) * 25);
       const trainScore = Math.round((Math.min(completedSessions, plannedSessions) / plannedSessions) * 35);
       const proteinScore = Math.round((proteinHitRate / 100) * 25);
-      const stepsScore = stepEntries.length > 0 ? Math.round((Math.min(1, stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length / stepsTarget)) * 15) : 0;
+      const stepsScore = stepDays.size > 0 ? Math.round(Math.min(1, avgSteps / stepsTarget) * 15) : 0;
       const totalScore = logScore + trainScore + proteinScore + stepsScore;
       const scoreLabel = totalScore >= 85 ? "Outstanding" : totalScore >= 70 ? "Strong" : totalScore >= 50 ? "Building" : "Below target";
 
@@ -195,7 +202,8 @@ export async function runSundayWeeklyReport(): Promise<void> {
         `📅 Showed up: ${daysWithLogs}/7 days`,
         `${trainEmoji} Training: ${completedSessions}/${plannedSessions} sessions`,
         `${stepsEmoji} Steps: ${stepsLine}`,
-        `${proteinEmoji} Protein days: ${proteinDays}/${foodDays} meals tracked`,
+        `🍽️ Food: ${foodDays}/7 days logged`,
+        `${proteinEmoji} Protein near target: ${proteinDays} of ${foodDays} logged day${foodDays !== 1 ? "s" : ""}`,
         weightLine ? `${weightEmoji} Weight: ${weightLine}` : "",
         ...(forecastLine ? [forecastLine] : []),
         streakLine || "", ``,
