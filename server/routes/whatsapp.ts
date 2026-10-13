@@ -149,6 +149,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
     await finalise("shadow");
     await closeHeldReminders(rootId ?? phone, false).catch(() => {}); // B7 (#538): not delivered, so still held
     await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, false).catch(() => {}); // A19: not delivered, still open
+    await (await import("../scheduler/shared")).closeWeighAsk(rootId ?? phone, false).catch(() => {}); // #297: not delivered, not asked
     return;
   }
 
@@ -165,6 +166,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   await finalise(outcome);
   await closeHeldReminders(rootId ?? phone, carried.length ? carried.every(r => deliveryAccepted(r)) : deliveryAccepted(outcome)).catch(() => {}); // B7 (#538, #554): closed only once its bubble is delivered
   await (await import("../core/client-record")).closeFollowUp(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // A19: asked only once delivered
+  await (await import("../scheduler/shared")).closeWeighAsk(rootId ?? phone, deliveryAccepted(outcome)).catch(() => {}); // #297: the weigh ask too
 }
 
 async function sendParts(

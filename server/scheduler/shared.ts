@@ -290,6 +290,15 @@ export async function recordWeighAsk(userId: string): Promise<void> {
     .onConflictDoNothing().catch((e: any) => console.warn("[WEIGH_ASK] not recorded:", e?.message || e));
 }
 
+/** A REACTIVE ASK RIDES ITS REPLY (#297): turn → client, recorded only once that reply's delivery is accepted. */
+const weighAskRiding = new Map<string, string>();
+export function weighAskRides(turnKey: string, userId: string): void { weighAskRiding.set(turnKey, userId); }
+export async function closeWeighAsk(turnKey: string, accepted: boolean): Promise<void> {
+  const id = weighAskRiding.get(turnKey);
+  weighAskRiding.delete(turnKey);
+  if (id && accepted) await recordWeighAsk(id);
+}
+
 /** When we last asked them to weigh, and whether they have written to us today (SAST). */
 export async function readWeighAskAndPresence(userId: string): Promise<{ daysSinceWeighAsk: number | null; presentToday: boolean }> {
   const { sastDaysBetween } = await import("../sast");

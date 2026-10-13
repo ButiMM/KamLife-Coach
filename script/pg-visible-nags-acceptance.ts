@@ -216,6 +216,21 @@ REAL("\n3. THE WEIGH-IN ASK IS RECORDED WHEN SENT AND CANNOT REPEAT DAILY");
   await pool.query("UPDATE sent_proactive SET sent_at = now() - interval '7 days' WHERE user_id = $1 AND message_key = 'weigh_ask'", [u.id]);
   const week = await canonicalNextMove(await fresh(u.phoneNumber), { hour: 7 });
   chk(week.action.kind === "weigh", "a week on, the ask may go out once more", week.action.kind);
+
+  // THE REACTIVE ASK TOO (#297): "what should I do today?" answered with the weigh-in records it only once that
+  // reply is delivered; a reply that never lands leaves the ask free for the next turn.
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1 AND message_key = 'weigh_ask'", [u.id]);
+  const { oneActionCommand } = await import("../server/handlers/one-action-command");
+  const { closeWeighAsk } = await import("../server/scheduler/shared");
+  const said = await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true, asksAboutToday: true });
+  if (/scale|weigh/i.test(said)) {
+    chk(await asks() === 0, "a reactive weigh-in ask is not recorded when it is decided (#297)", String(await asks()));
+    await closeWeighAsk(u.phoneNumber, false);
+    chk(await asks() === 0, "…nor when its reply is not delivered", String(await asks()));
+    await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true, asksAboutToday: true });
+    await closeWeighAsk(u.phoneNumber, true);
+    chk(await asks() === 1, "…and is recorded once the reply is delivered", String(await asks()));
+  } else chk(false, "the reactive one-action answer for a never-weighed client is the weigh-in", said.slice(0, 120));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
