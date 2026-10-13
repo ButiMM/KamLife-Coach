@@ -8345,6 +8345,13 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     ]) assert.equal(verifyBrainReply(bad, {}).ok, false, `must be blocked: ${bad}`);
   });
 
+  test("clinical: the onboarding meal plan sets no medicine timing (#329: some ARVs are taken at bedtime, on an empty stomach)", async () => {
+    const { getOnboardingMealPlan } = await import("../server/onboarding-meal-plan");
+    const plan = getOnboardingMealPlan({ name: "Thandi", goalType: "recomposition", medicalConditions: "hiv_arvs,diabetes", calorieTarget: 1900, proteinTarget: 120 });
+    assert.doesNotMatch(plan, /empty stomach|with breakfast every day|strict meal timing|no exceptions/i);
+    assert.match(plan, /clinic/i, "the ARV line points to the clinic");
+  });
+
   test("clinical: legitimate coaching about the same clients still passes", () => {
     for (const ok of [
       "Slow-release carbs like samp and beans suit you well — keep meals regular.",
