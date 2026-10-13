@@ -713,9 +713,19 @@ async function runActions(p: { phone: string; message: string; user: any; source
     const words = await afterLogReply(phone, message, receipt, logged.performed ? "food" : "workout", logged.user);
     return { reply: [words || receipt, logged.confirm || w?.ask].filter(Boolean).join("\n\n"), src: "core front: log + workout", wrote: true };
   }
-  if (one?.type === "LOG_SLEEP") { // the sleep log reads the hours from their words and keeps the weekly trend (B5)
+  const sleep = acts.find(a => a.type === "LOG_SLEEP");
+  if (sleep && acts.every(a => a === sleep || LOGS.has(a.type))) { // the sleep log reads the hours from their words and keeps the weekly trend (B5)
+    const conf = 1 - (u.uncertainty || 0), rest = acts.filter(a => a !== sleep);
+    if (!(await import("../understanding/actions")).shouldAutoExecute(sleep, conf)) return null; // unsure: words, never a record (#643 review)
+    // The sleep log has no date of its own: "on Monday" is not written as tonight's (#643 review). Last night's sleep is today's.
+    if ((await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when !== "today") return null;
+    const logged = rest.length ? await logThroughExecutor(phone, message, rest, conf, p.sourceMessageId) : null; // "chicken for supper and I slept 5 hours"
     const r = await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false });
-    return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
+    if (!logged) return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
+    if (!logged.performed && !r) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
+    const receipt = [(logged.card + logged.reply).trim(), r].filter(Boolean).join("\n\n");
+    const words = logged.performed ? await afterLogReply(phone, message, receipt, rest.some(a => a.type === "LOG_MEAL") ? "food" : "steps", logged.user) : null;
+    return { reply: [words || receipt, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: log + sleep", wrote: true };
   }
   if (one?.type === "SET_GOAL") {
     const said = `change my goal to ${one.goal.replace("_", " ")}`;

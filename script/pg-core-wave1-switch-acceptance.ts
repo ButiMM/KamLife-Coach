@@ -36,7 +36,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
-      : /^I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -161,6 +162,14 @@ REAL("\n4i. SLEEP THROUGH THE FRONT DOOR (A6)");
   const sl = await say(T, "I slept 5 hours last night");
   const logged = (await pool.query("SELECT count(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'SLEEP_LOG'", [T])).rows[0].n;
   chk(logged === 1 && /5/.test(sl) && !sl.includes(NEW), "\"I slept 5 hours last night\" is logged by the sleep owner (it feeds the weekly sleep trend) and answered with it", `${logged} | ${sl.slice(0, 160)}`);
+  const sleeps = async () => (await pool.query("SELECT count(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'SLEEP_LOG'", [T])).rows[0].n as number;
+  const unsure = await say(T, "I slept maybe 5 hours last night");
+  chk(await sleeps() === 1, "an unsure reading (\"maybe\") writes no sleep record: the confidence gate holds (#643 review)", unsure.slice(0, 160));
+  const back = await say(T, "I slept 5 hours 2 days ago");
+  chk(await sleeps() === 1, "sleep from 2 days ago is not written as last night's: the sleep log has no date of its own (#643 review)", back.slice(0, 160));
+  const both = await say(T, "For supper I had chicken and I slept 5 hours last night");
+  const supper = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(supper === 1 && await sleeps() === 2, "supper and sleep in one message: both are written (#643 review)", `${supper} meal(s), ${await sleeps()} sleep(s) | ${both.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
