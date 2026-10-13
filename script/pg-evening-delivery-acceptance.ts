@@ -431,6 +431,24 @@ for (const why of ["window shuts before the evening", "sick and paused"] as cons
   await pool.query("UPDATE users SET profile_notes = NULL WHERE id = $1", [user.id]);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+REAL("\n12. DAY 2 OF ONBOARDING IS A QUESTION, NOT A MENU (B9, #647)");
+// ════════════════════════════════════════════════════════════════════════
+// "How did Day 1 go? Reply DONE if you completed the session" went to everyone, including a client who said on day 1
+// that their doctor told them to rest. With no model it is the plain floor, and the floor carries no command words.
+{
+  await reset();
+  stubTwilio(false);
+  await pool.query("DELETE FROM escalations WHERE user_id = $1", [user.id]); // §8's safety route holds every proactive send
+  await pool.query("UPDATE users SET programme_start_date = now() - interval '2 days 1 hour' WHERE id = $1", [user.id]);
+  const { runEarlyOnboarding } = await import("../server/scheduler/jobs/onboarding");
+  await runEarlyOnboarding();
+  const day2 = freeformSent().join("\n");
+  chk(/how did yesterday go/i.test(day2) && !/completed the session|reply done/i.test(day2),
+    "day 2 asks how it went in their own words, never \"Reply DONE if you completed the session\" (#647)", JSON.stringify(day2.slice(0, 200)));
+  await pool.query("UPDATE users SET programme_start_date = NULL WHERE id = $1", [user.id]);
+}
+
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(failed ? `\npg-evening-delivery-acceptance: FAILED — ${failed} assertion(s)\n`
             : "\npg-evening-delivery-acceptance: GREEN\n");

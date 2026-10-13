@@ -11068,7 +11068,7 @@ test("day-one message: no reply shortcut the product no longer answers (\"2\" ha
   const { readFileSync } = await import("node:fs");
   const src = readFileSync("server/scheduler/jobs/onboarding.ts", "utf8");
   assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
-  assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
+  assert.ok(src.includes("how much you walk today, in your own words"), "it says steps are logged in their own words (B9: no menu)");
 });
 
 test("#506 evidence: usage stats are nearest-rank per client, and a logged template body is named by its template", async () => {
