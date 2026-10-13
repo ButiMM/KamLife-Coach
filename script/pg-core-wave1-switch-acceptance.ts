@@ -36,6 +36,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
       : /ndityile into/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "something", needsConfirmation: false }]
       : /ndizilinganise, 82 not sure/i.test(msg) ? [{ type: "LOG_WEIGHT", kg: 82 }]
@@ -148,6 +149,18 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   const nf = await say(T, "Lunch was rice not samp. For supper I had beef.");
   chk(/couldn't find/i.test(nf) && !nf.includes(NEW), "a correction that didn't land keeps its warning; the supper still logs", nf.slice(0, 200));
   delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4i. SLEEP THROUGH THE FRONT DOOR (A6)");
+{
+  const T = "whatsapp:+27829438006";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Sleep Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const sl = await say(T, "I slept 5 hours last night");
+  const logged = (await pool.query("SELECT count(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'SLEEP_LOG'", [T])).rows[0].n;
+  chk(logged === 1 && /5/.test(sl) && !sl.includes(NEW), "\"I slept 5 hours last night\" is logged by the sleep owner (it feeds the weekly sleep trend) and answered with it", `${logged} | ${sl.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

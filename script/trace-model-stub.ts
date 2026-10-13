@@ -29,6 +29,7 @@ const READINGS: Array<[RegExp, { family: string; actions?: unknown[]; facts?: un
   [/^I weigh 87kg today$/i, { family: "report", actions: [{ type: "LOG_WEIGHT", kg: 87 }] }],
   [/^Had pap and wors for lunch and did a 30 min home workout$/i, { family: "report", actions: [meal("pap and wors", "lunch"), { type: "LOG_WORKOUT", what: "a 30 min home workout" }] }],
   [/^what'?s my workout today\??$/i, { family: "question", actions: [{ type: "SHOW_WORKOUT" }] }],
+  [/^I slept 5 hours last night$/i, { family: "report", actions: [{ type: "LOG_SLEEP" }] }],
   [/^I did a 30 min home workout$/i, { family: "report", actions: [{ type: "LOG_WORKOUT", what: "a 30 min home workout" }] }],
   [/^remind me to drink water at 3pm$/i, { family: "plan", actions: [{ type: "SET_REMINDER", body: "drink water", when: "at 3pm" }] }],
 ];
