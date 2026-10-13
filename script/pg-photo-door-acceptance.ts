@@ -54,6 +54,9 @@ visionText = "Pap, chicken and spinach — a solid plate.\nTOTAL: 650 kcal | 45g
 const p = await photo("");
 chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(p), "a plate photo gets its meal card, as a typed meal does (lost 5 Aug; founder, 7 Oct)", p.slice(0, 200));
 chk(!CANNOT.test(p) && (await meals()).length >= 1, "a plate photo is logged and answered", `${p.slice(0, 160)} | ${JSON.stringify(await meals())}`);
+await new Promise(r => setTimeout(r, 300)); // cost rows are written fire-and-forget
+const vrows = (await pool.query("SELECT g.feature, g.model FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1", [P])).rows;
+chk(vrows.filter(r => r.feature === "vision").length === 2 && vrows.every(r => r.model !== "service"), "each photo's vision call is priced once, as \"vision\", from its real tokens (#626 review)", JSON.stringify(vrows));
 visionText = "Rooibos with a splash of milk.\n- Rooibos with milk (250ml): 40 kcal, 1g protein\nTOTAL: 40 kcal | 1g protein\nITEMS: rooibos"; (await import("../server/card-policy"))._resetDumpWindow();
 const t = await photo("");
 chk(!t.includes("[MEDIA:"), "a 40 kcal tea photo gets no meal card, as a typed tea gets none (#615 review)", `${t.slice(0, 200)} | ${JSON.stringify(await meals())}`);

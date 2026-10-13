@@ -18,7 +18,6 @@
 
 import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
-import { recordGptCost } from "../gpt";
 import {
   type UnderstandingState,
   coerceUnderstanding,
@@ -71,13 +70,6 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
         { role: "system", content: PERCEPTION_SYSTEM },
         { role: "user", content: `CURRENT UNDERSTANDING:\n${JSON.stringify(seed)}\n\nCLIENT'S NEW MESSAGE:\n"${message.slice(0, 1200)}"\n\nReturn the updated understanding as JSON.` },
       ],
-    });
-    recordGptCost({
-      userId: userId ?? null,
-      model: "gpt-4o-mini",
-      feature: "perception",
-      promptTokens: resp.usage?.prompt_tokens ?? 0,
-      completionTokens: resp.usage?.completion_tokens ?? 0,
     });
 
     const content = resp.choices[0]?.message?.content;
