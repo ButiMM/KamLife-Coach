@@ -435,10 +435,10 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       // Through the proactive door (#265): a message the founder types is still a proactive message,
       // so a client who opted out does not receive it, and the founder is told so.
       const outcome = await sendWhatsApp(toNum, message.trim());
-      if (outcome === "dropped") return res.status(409).json({ message: "Not sent — refused at the send boundary (the client opted out, or the truth floor refused the text)" });
+      if (outcome === "dropped") return res.status(409).json({ message: "Not sent — the client opted out, the truth floor refused the text, or they are outside WhatsApp's 24-hour window and no approved template carries this message (#327)." });
       // A substitute is not this message (Codex @ bbffa67): outside the 24-hour window WhatsApp
       // refuses freeform text and the generic re-engagement template goes instead.
-      if (!deliveryAccepted(outcome)) return res.status(502).json({ message: "Not delivered — the client is outside WhatsApp's 24-hour window, so only the generic check-in template went. Your message was not sent." });
+      if (!deliveryAccepted(outcome)) return res.status(502).json({ message: "Not delivered — your message was not sent." });
       await logChat(user.id, "[admin-sent]", message.trim(), "ADMIN_MESSAGE");
 
       console.log(`[ADMIN] Message sent to ${toNum.slice(-8)}: "${message.slice(0, 60)}"`);

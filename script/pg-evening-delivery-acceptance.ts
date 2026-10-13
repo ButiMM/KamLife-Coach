@@ -233,6 +233,8 @@ REAL("\n4. A MESSAGE THAT HAS ITS OWN TEMPLATE IS UNAFFECTED — Cut 6 still wor
   const h = await history();
   chk(h.length === 1 && h[0].intent === "PROACTIVE",
     "it is recorded as a delivery, NOT a substitution", JSON.stringify(h.map(r => r.intent)));
+  chk(!!h[0] && /your KamLife plan for today is ready/.test(h[0].body),
+    "…and the stored body is the template the client READ, not the text it stood in for", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
