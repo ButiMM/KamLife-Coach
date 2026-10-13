@@ -171,6 +171,13 @@ export async function runMorningCheckin(): Promise<void> {
         console.error(`[TARGET_SANITY] bounds fix ${client.phoneNumber.slice(-4)}:`, JSON.stringify(fixes));
       }
     } catch (boundsErr) { console.error("[TARGET_SANITY] bounds check failed:", boundsErr); }
+    // A COMMITMENT DUE TODAY OWNS THE DAY'S ONE MESSAGE (#645): the morning used the slot and the evening's "how did
+    // it go?" was capped away. On its due day the morning stands down, if the evening can deliver the check-in,
+    // and ahead of the silence ladder: a promise made days ahead is often followed by a quiet spell (#652 attack).
+    const due = await activeCommitment(client.id).catch(() => null);
+    if (due && !due.outcome && due.state === "open" && due.due === todaySAST() && !withheldContext(client.lifeSituation)
+      && (templateSid(CHECKIN_TEMPLATE) || await inWhatsAppWindow(client.id))) continue;
+
     // ── SILENCE HAS ONE OWNER ────────────────────────────────────────────────────────────────
     //
     // (2026-08-19, Cut 6.) Deliberately ABOVE the night-shift skip below. That skip exists
@@ -218,12 +225,6 @@ export async function runMorningCheckin(): Promise<void> {
       const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
       const isTodayTrainingDay = schedule.includes(todayDOW);
       const progDays = programmeDaysSince(client.programmeStartDate);
-
-      // A COMMITMENT DUE TODAY OWNS THE DAY'S ONE MESSAGE (#645): the morning used the slot and the evening's "how did
-      // it go?" was capped away. On its due day the morning stands down, if the evening can deliver the check-in.
-      const due = await activeCommitment(client.id).catch(() => null);
-      if (due && !due.outcome && due.state === "open" && due.due === todaySAST() && !withheldContext(client.lifeSituation)
-        && (templateSid(CHECKIN_TEMPLATE) || await inWhatsAppWindow(client.id))) continue;
 
       if (await claimDailySlot(client.id, "morning")) {
         // ONE DECISION OWNER, ONE STATE (Issue #49 step 4): decideProactive picks the one action from the

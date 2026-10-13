@@ -87,8 +87,10 @@ export async function runEveningAccountability(): Promise<void> {
     // Routine evening accountability — eases off as a client goes quiet so we don't
     // stack onto the morning comeback flow (which owns 3+ day silent users) and so we
     // stop paying to message people who have checked out. Engaged users (daysSilent ≤ 1)
-    // are unaffected. Also enforces the 1/day cap and the global pause.
-    if (!canSendRoutineNudge(client)) continue;
+    // are unaffected. Also enforces the 1/day cap and the global pause. A check-in they asked for is not routine: it
+    // still goes after a quiet spell (#652 attack), so the morning comeback stands down for it on the due day.
+    const routine = canSendRoutineNudge(client);
+    if (!routine && !canSendProactive(client.id)) continue;
     try {
       const name = (client.name || "there").split(" ")[0];
       const phone = client.phoneNumber;
@@ -113,6 +115,7 @@ export async function runEveningAccountability(): Promise<void> {
         await sendProactive(client, { job: "evening" }, `✅ ${name}, you planned ${promise.what} today, and you did it.${whatsNewLine()}`);
         continue;
       }
+      if (!routine) continue;
 
       // THE EMPTY DAY IS A DECISION LIKE ANY OTHER (2026-08-25, P0-4b). These two branches were a
       // ladder of their own: a day-one client got "Reply *1* … get it done tonight" — a training

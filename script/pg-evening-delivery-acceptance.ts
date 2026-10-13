@@ -385,9 +385,10 @@ REAL("\n11. ON A COMMITMENT'S DUE DAY THE MORNING STANDS DOWN, SO THE CHECK-IN G
 // ════════════════════════════════════════════════════════════════════════
 // "I'll walk after work on Thursday". On Thursday the morning used the day's one slot and the evening's
 // "how did it go?" was capped away: the one thing we promised to follow up never went out.
-{
+for (const quietDays of [0, 4]) { // and after a quiet spell since the promise (#652 attack): the silence ladder stands down too
   await reset();
   stubTwilio(false);
+  await pool.query("UPDATE users SET last_active_at = now() - make_interval(days => $2) WHERE id = $1", [user.id, quietDays]);
   const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
   await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
@@ -398,8 +399,9 @@ REAL("\n11. ON A COMMITMENT'S DUE DAY THE MORNING STANDS DOWN, SO THE CHECK-IN G
   await runEveningAccountability();
   const sent = [...freeformSent(), ...templatesSent()];
   chk(sent.length === 1 && (/you planned .*walk after work.*how did it go/i.test(sent[0]) || sent[0] === SID.checkin),
-    "Thursday's one message is the check-in: the morning stood down", JSON.stringify(sent));
+    `Thursday's one message is the check-in: the morning stood down (${quietDays} quiet days before it)`, JSON.stringify(sent));
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("UPDATE users SET last_active_at = now() WHERE id = $1", [user.id]);
 }
 
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
