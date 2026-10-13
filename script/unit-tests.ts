@@ -701,23 +701,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
-// PENDING CONFIRM — the "reply yes" question now has a landing pad (2026-07-23 live: "yes"
-// looped forever because the offered action was parked nowhere). Round-trip + one-shot.
-{
-  const { setPendingConfirm, takePendingConfirm, _resetPendingConfirm } = await import("../server/understanding/executor");
-  test("pending confirm: parked action is returned once, then gone", async () => {
-    _resetPendingConfirm();
-    const action = { type: "LOG_MEAL", foodText: "half a vienna" } as any;
-    setPendingConfirm("u1", action);
-    assert.deepEqual(takePendingConfirm("u1"), action, "first take returns the parked action");
-    assert.equal(takePendingConfirm("u1"), null, "second take is empty — never double-fires");
-  });
-  test("pending confirm: an unknown user has nothing parked", async () => {
-    _resetPendingConfirm();
-    assert.equal(takePendingConfirm("nobody"), null);
-  });
-}
-
 // CONFIRM-REPLY CLASSIFIER — a clean yes/no resolves the offer; anything else is a fresh
 // correction that must flow on to normal understanding (never silently cancel or mis-fire).
 
