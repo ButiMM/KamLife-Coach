@@ -159,7 +159,7 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
-REAL("\n4i. SLEEP THROUGH THE FRONT DOOR (A6)");
+REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
 {
   const T = "whatsapp:+27829438006";
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
@@ -176,6 +176,44 @@ REAL("\n4i. SLEEP THROUGH THE FRONT DOOR (A6)");
   const both = await say(T, "For supper I had chicken and I slept 5 hours last night");
   const supper = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
   chk(supper === 1 && await sleeps() === 2, "supper and sleep in one message: both are written (#643 review)", `${supper} meal(s), ${await sleeps()} sleep(s) | ${both.slice(0, 160)}`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT (#637)");
+{
+  const T = "whatsapp:+27829438637";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Last Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const rows = async () => (await pool.query("SELECT meal_label l, raw_message r FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY m.created_at", [T])).rows;
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and wors for lunch");
+  await say(T, "I had chicken and rice for supper");
+  await say(T, "Lunch was a burger not pap"); // the correction rewrites lunch's row in place
+  const before = await rows();
+  await say(T, "Please remove my last meal");
+  const after = await rows();
+  chk(before.length === 2 && after.length === 1 && after[0].l === "lunch",
+    "supper, then a lunch correction, then \"remove my last meal\": supper goes and lunch stays", `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  // MEALS WRITTEN BEFORE 0023 KEEP THEIR SEND ORDER (#650 attack): lunch sent first, then "at 9 I had eggs", backdated.
+  // The migration's own backfill runs on rows shaped like the legacy ones, inside a transaction that is rolled back.
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("ALTER TABLE meal_logs ALTER COLUMN created_at DROP NOT NULL");
+    const uid = (await c.query("SELECT id FROM users WHERE phone_number = $1", [T])).rows[0].id, run = `SM650${Date.now()}`;
+    for (const [n, label, ate, sent] of [[1, "lunch", "12:00", "12:05"], [2, "breakfast", "09:00", "12:10"]] as const) {
+      const day = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+      await c.query("INSERT INTO client_events (user_id, source_message_id, received_at, raw_text) VALUES ($1, $2, $3, $4)", [uid, `${run}${n}`, `${day}T${sent}:00+02:00`, label]);
+      await c.query("INSERT INTO meal_logs (user_id, source, meal_label, kcal_int, logged_at, source_message_id, created_at) VALUES ($1, 'text', $2, 300, $3, $4, NULL)",
+        [uid, label, new Date(`${day}T${ate}:00+02:00`), `${run}${n}#log ${label}`]);
+    }
+    const { readFileSync } = await import("node:fs");
+    await c.query(readFileSync("migrations/0023_meal_created_at.sql", "utf-8").split("--> statement-breakpoint").find(q => /UPDATE/.test(q))!);
+    const last = (await c.query("SELECT meal_label FROM meal_logs WHERE user_id = $1 AND source_message_id LIKE $2 ORDER BY created_at DESC LIMIT 1", [uid, `${run}%`])).rows[0]?.meal_label;
+    chk(last === "breakfast", "a meal logged before the migration keeps its send order: the backdated breakfast, sent last, is last (#650 attack)", String(last));
+  } finally { await c.query("ROLLBACK"); c.release(); }
+  delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
