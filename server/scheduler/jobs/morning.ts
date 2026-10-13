@@ -174,9 +174,12 @@ export async function runMorningCheckin(): Promise<void> {
     // A COMMITMENT DUE TODAY OWNS THE DAY'S ONE MESSAGE (#645): the morning used the slot and the evening's "how did
     // it go?" was capped away. On its due day the morning stands down, if the evening can deliver the check-in,
     // and ahead of the silence ladder: a promise made days ahead is often followed by a quiet spell (#652 attack).
+    // "Can deliver" is judged at the evening's hour, 13 hours on, and a paused client is skipped by the evening, so
+    // neither stands the morning down (Codex P1s on 6be9ebd): otherwise that day they hear nothing at all.
     const due = await activeCommitment(client.id).catch(() => null);
     if (due && !due.outcome && due.state === "open" && due.due === todaySAST() && !withheldContext(client.lifeSituation)
-      && (templateSid(CHECKIN_TEMPLATE) || await inWhatsAppWindow(client.id))) continue;
+      && pauseReason(client) === null
+      && (templateSid(CHECKIN_TEMPLATE) || await inWhatsAppWindow(client.id, Date.now() + 13 * 3_600_000))) continue;
 
     // ── SILENCE HAS ONE OWNER ────────────────────────────────────────────────────────────────
     //

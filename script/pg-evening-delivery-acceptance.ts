@@ -404,6 +404,33 @@ for (const quietDays of [0, 4]) { // and after a quiet spell since the promise (
   await pool.query("UPDATE users SET last_active_at = now() WHERE id = $1", [user.id]);
 }
 
+// The morning stands down only when the evening will really send (Codex P1s on 6be9ebd). With no check-in
+// template, a window open at 06:00 but shut by 19:00 sends nothing in the evening; a sick client is skipped by
+// the evening. Either way the morning must still go, or that day they hear nothing.
+for (const why of ["window shuts before the evening", "sick and paused"] as const) {
+  await reset();
+  stubTwilio(false);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  const savedSid = process.env.TWILIO_CHECKIN_TEMPLATE_SID;
+  if (why === "window shuts before the evening") delete process.env.TWILIO_CHECKIN_TEMPLATE_SID;
+  await pool.query("DELETE FROM client_events WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_events (user_id, raw_text, received_at) VALUES ($1, 'ok', now() - interval '20 hours')", [user.id]);
+  if (why === "sick and paused") await pool.query("UPDATE users SET profile_notes = $2 WHERE id = $1", [user.id, `sick_since:${today} | sick_until:${today} | paused_until:${today}`]);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  const { runMorningCheckin } = await import("../server/scheduler/jobs/morning");
+  await runMorningCheckin();
+  const morning = mine().length;
+  _resetOutboundDedupe();
+  await runEveningAccountability();
+  chk(morning >= 1, `${why}: the evening can't send the check-in, so the morning does not stand down`, JSON.stringify(mine()));
+  if (savedSid !== undefined) process.env.TWILIO_CHECKIN_TEMPLATE_SID = savedSid;
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("DELETE FROM client_events WHERE user_id = $1", [user.id]);
+  await pool.query("UPDATE users SET profile_notes = NULL WHERE id = $1", [user.id]);
+}
+
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(failed ? `\npg-evening-delivery-acceptance: FAILED — ${failed} assertion(s)\n`
             : "\npg-evening-delivery-acceptance: GREEN\n");
