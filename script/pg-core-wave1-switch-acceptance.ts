@@ -215,6 +215,11 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
     const late = await nudge();
     chk(/takeaway/i.test(late), "a third takeaway sent late (\"earlier today I had a burger\") still gets the takeaway line (#622 review)", late || "(none)");
   }
+  const r0 = await count(TESTER); await say(TESTER, "I had samp and beans for supper"); const r1 = await count(TESTER);
+  const rs = await say(TESTER, "I had samp and beans for supper");
+  chk(r1 === r0 + 1 && await count(TESTER) === r1 && /already in your log/i.test(rs) && !/chakalaka|solid meal/i.test(rs), "a resent meal is not logged twice and gets a plain \"already in your log\", not the old receipt", rs.slice(0, 200));
+  const y0 = await count(TESTER); await say(TESTER, "I had pap and spinach yesterday"); const yr = await say(TESTER, "I had pap and spinach yesterday");
+  chk(await count(TESTER) === y0 + 1 && /already in your log/i.test(yr) && !/today/i.test(yr), "a resent \"…yesterday\" meal is not called today's (#628 review)", `${y0}→${await count(TESTER)} | ${yr.slice(0, 160)} | ${JSON.stringify((await pool.query("SELECT raw_message, logged_at::date d FROM meal_logs m JOIN users u ON u.id=m.user_id WHERE u.phone_number=$1 AND raw_message ILIKE $2", [TESTER, "%spinach%"])).rows)}`);
   const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
   const c0 = await costRows();
   const ot = await say(TESTER, "Am I on track?");

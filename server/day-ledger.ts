@@ -285,7 +285,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
     .from(mealLogs)
     .where(and(
       eq(mealLogs.userId, params.userId),
-      writtenWithin(4 * 60 * 1000),
+      // …or filed near the same past moment: "I had pap yesterday" sent twice is one meal (#628 review).
+      or(writtenWithin(4 * 60 * 1000), and(gte(mealLogs.loggedAt, new Date(effLoggedAt.getTime() - 4 * 60 * 1000)), lte(mealLogs.loggedAt, new Date(effLoggedAt.getTime() + 60_000)))),
       eq(mealLogs.kcalInt, effectiveKcal),
       eq(mealLogs.rawMessage, rawSlice),
     ))
@@ -322,6 +323,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
   if (amendedId) { invalidatePatternCache(params.userId); invalidateFoodTotalsCache(params.userId); }
   let insertOk = true;
   const wasDup = recentDup.length > 0 || !!amendedId;
+  if (recentDup.length > 0) turnMutation("HELD meal resend: already on the ledger"); // the turn can say so instead of guessing
   if (!wasDup) {
     try {
       await db.insert(mealLogs).values({
