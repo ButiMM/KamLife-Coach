@@ -68,11 +68,13 @@ NOT facts: questions ("could my knee be the problem?"), other people ("my sister
 food they ate (meals are logged elsewhere), greetings, and anything you would have to guess.
 If the message corrects or replaces one of the KNOWN FACTS listed below it, set "corrects" to that known fact's subject, exactly as listed.
 A fact that only starts later ("I start night shifts in December") gets "valid_from"; one that ends ("my knee is sore this week") gets "valid_until".
+If they ask you to forget or stop using one of the KNOWN FACTS, or say it no longer holds ("my knee is fine now"), give that fact's kind and
+subject exactly as listed, their words as "statement", and "retires": true. Nothing replaces it.
 
 In your JSON, include "facts":[{"kind":"goal|injury|constraint|schedule|preference|life_event|commitment","subject":"<2-4 words, lowercase>","statement":"<the client's own words, verbatim span>","detail":{},"valid_from":"YYYY-MM-DD or null","valid_until":"YYYY-MM-DD or null","corrects":"<known subject or null>"}]}
 Use "facts":[] when there is nothing.`;
 
-type Extracted = { kind: string; subject: string; statement: string; detail?: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; corrects?: string | null };
+type Extracted = { kind: string; subject: string; statement: string; detail?: Record<string, unknown>; valid_from?: string | null; valid_until?: string | null; corrects?: string | null; retires?: boolean | null };
 
 const norm = (t: string) => t.toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
 
@@ -223,7 +225,8 @@ export function parseExtraction(raw: string, message: string): Extracted[] {
 export async function knownFacts(userId: string): Promise<string> {
   // CORRECTIONS NEED THE RECORD (Codex @ c5a521b): "actually the race is in May" names no prior subject.
   const known = await db.select({ kind: clientFacts.kind, subject: clientFacts.subject, statement: clientFacts.statement })
-    .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.kind, "pattern"))).orderBy(desc(clientFacts.createdAt)).limit(30);
+    .from(clientFacts).where(and(eq(clientFacts.userId, userId), isNull(clientFacts.supersededBy), ne(clientFacts.kind, "pattern"),
+      sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`)).orderBy(desc(clientFacts.createdAt)).limit(30); // an ended fact is not known (#636)
   const [last] = await db.select({ said: sql<string>`coalesce(${turnLedger.deliveredBody}, ${turnLedger.reply})` }).from(turnLedger)
     .where(eq(turnLedger.userId, userId)).orderBy(desc(turnLedger.createdAt)).limit(1);
   const today = new Date(`${sastDayKey()}T12:00:00Z`).toLocaleDateString("en-ZA", { weekday: "long", timeZone: "UTC" });
@@ -252,6 +255,23 @@ export async function applyFacts(eventId: string, raw: string): Promise<number> 
   const open = facts.some(f => f.kind === "commitment") ? await activeCommitment(ev.userId) : null;
   let written = 0;
   for (const f of facts) {
+    // FORGET, OR NO LONGER TRUE (#636): "forget that I said I work nights", "my knee is fine now". The known fact ends
+    // now and nothing replaces it; the sentence itself is never stored as a new fact the coach would then repeat.
+    if (f.retires === true && f.kind !== "commitment") {
+      // The client's own words for ending it are required, as for a delete: the model alone never retires a fact.
+      // Not negated either: "please don't forget my knee" keeps it (#651 attack).
+      const said = norm(text), w = said.match(/\b(forget|stop using|don'?t use|ignore|drop|delete|remove|no longer|not any ?more|fine now|better now|healed|recovered|all good now)\b/);
+      if (!w || NEGATED.test(said.slice(Math.max(0, (w.index ?? 0) - 24), w.index))) continue;
+      const ended = await db.update(clientFacts).set({ validUntil: sql`now()` }).where(and( // the readers' clock
+        eq(clientFacts.userId, ev.userId), isNull(clientFacts.supersededBy), eq(clientFacts.kind, f.kind),
+        inArray(clientFacts.subject, [f.subject, (f.corrects || "").trim().toLowerCase()].filter(Boolean)),
+        sql`(${clientFacts.validUntil} IS NULL OR ${clientFacts.validUntil} > now())`,
+        // Only what was known when they said it: a newer fact processed first is never ended (Codex P1 on 8b2f676).
+        sql`coalesce((SELECT ce.received_at FROM client_events ce WHERE ce.id = ${clientFacts.sourceEventId}), ${clientFacts.createdAt}) < ${ev.receivedAt}`,
+      )).returning({ id: clientFacts.id });
+      written += ended.length;
+      continue;
+    }
     if (f.kind === "commitment") {
       const d = f.detail as Partial<Commitment>;
       if (d.outcome && (!open || open.outcome)) continue; // an outcome of nothing open is not a fact
