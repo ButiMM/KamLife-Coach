@@ -319,6 +319,17 @@ chk(!promisesNoCharge(c3.reply), "a cancel PayFast did not confirm does not prom
 chk(admitsNotConfirmed(c3.reply), "the client is told the billing cancel is not yet confirmed", `reply: ${JSON.stringify(c3.reply)}`);
 chk(/\+?27820000974/.test(c3.founder) && admitsNotConfirmed(c3.founder),
   "the founder is told to cancel this client's billing by hand", `founder: ${JSON.stringify(c3.founder)}`);
+// …AND IT STAYS IN FRONT OF THEM (#572): a founder task that the 07:00 inbox lists, with its age, until it is resolved.
+{
+  const { founderMorningInbox } = await import("../server/safety-detection");
+  const [task] = (await pool.query("SELECT e.id FROM escalations e JOIN users u ON u.id = e.user_id WHERE u.phone_number = $1 AND e.reason = 'billing' AND e.status = 'open'", [L.phone])).rows;
+  await pool.query("UPDATE escalations SET created_at = now() - interval '3 days' WHERE id = $1", [task?.id ?? 0]);
+  const inbox = await founderMorningInbox();
+  chk(!!task && /Money tasks open/.test(inbox || "") && /• 3d — PayFast did NOT confirm/.test(inbox || ""),
+    "an unconfirmed cancel is a founder task, listed every morning with its age (#572)", JSON.stringify(inbox));
+  await pool.query("UPDATE escalations SET status = 'resolved', resolved_at = now() WHERE id = $1", [task?.id ?? 0]);
+  chk(!/PayFast did NOT confirm/.test((await founderMorningInbox()) || ""), "…until it is resolved in the dashboard");
+}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n4. PAYFAST CHARGES THE CANCELLED SUBSCRIPTION — the charge does not undo the client's decision");
