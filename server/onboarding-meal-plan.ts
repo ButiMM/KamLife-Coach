@@ -197,10 +197,10 @@ export function getOnboardingMealPlan(user: any): string {
 
   // Medical flags for header
   const medFlags: string[] = [];
-  if (isDiabetic) medFlags.push("Diabetic protocol — low GI carbs, strict meal timing");
+  if (isDiabetic) medFlags.push("Diabetes — low GI carbs, regular meals (medication and sugar targets are your doctor's call)");
   if (isHypertension) medFlags.push("Hypertension — low sodium, no Aromat, no processed meats");
   if (isPCOS) medFlags.push("PCOS — low GI, anti-inflammatory");
-  if (isHIV) medFlags.push("HIV/ARVs — take with breakfast, +20% protein");
+  if (isHIV) medFlags.push("HIV/ARVs — +20% protein (how you take your ARVs is your clinic's call)");
   if (noPeanuts) medFlags.push("Peanut allergy — PB removed");
   if (noFish) medFlags.push("Fish allergy — pilchards/tuna replaced with eggs/chicken");
   if (noDairy) medFlags.push("Dairy free");
@@ -568,14 +568,15 @@ export function getOnboardingMealPlan(user: any): string {
 
   // Special situation notes
   const goalNote = goal === "fat_loss"
-    ? `\n\n⚠️ *Fat loss rules:* Sweet potato over white pap always. High-volume veg fills the plate first — protein second, carbs last. ${noDairyEff ? "" : "Low fat dairy only."} ${noPeanuts ? "" : "Max 1 tbsp peanut butter — not a staple."}`
+    ? `\n\n⚠️ *Fat loss rules:* Sweet potato over white pap when you can. High-volume veg fills the plate first — protein second, carbs last. ${noDairyEff ? "" : "Low fat dairy only."} ${noPeanuts ? "" : "Max 1 tbsp peanut butter — not a staple."}`
     : goal === "muscle_gain"
     ? `\n\n💪 *Muscle gain rules:* ${isVegan ? "Plant protein at every meal — beans, lentils, tofu, soya mince. Hit the numbers." : "Whole eggs every time — the yolk has the nutrients."} ${noDairyEff ? (isVegan ? "Soya milk adds easy calories." : "") : `${milkType} for extra calories.`} ${noPeanuts ? "" : "Peanut butter is your friend — calorie dense and protein rich."} Pre and post-workout meals are non-negotiable.`
     : goal === "recomposition"
-    ? `\n\n🔄 *Recomp rules:* Carbs before and after training. Lower carbs on rest day evenings. Protein stays the same every day — no exceptions. Zero empty calories.`
+    ? `\n\n🔄 *Recomp rules:* Carbs before and after training. Lower carbs on rest day evenings. Protein stays steady every day.`
     : "";
   const nightNote = isNightShift ? `\n\n🌙 *Night shift:* All timings are relative to your shift. Pre-shift = your breakfast. Post-shift = your dinner.` : "";
-  const hivNote = isHIV ? `\n\n💊 *ARV reminder:* Take your medication with breakfast every day — never on an empty stomach.` : "";
+  // #329: medicine timing is the clinic's, never the plan's — some ARVs are taken at bedtime on an empty stomach.
+  const hivNote = isHIV ? `\n\n💊 *Your ARVs:* how and when you take them is between you and your clinic. This plan just fits around your meals.` : "";
   const isPostpartumPlan = situation === "postpartum_breastfeeding";
   const domesticNote = (situation === "retail_physical" && !isUnemployed) ? `\n\n🧹 *Active job note:* Your job already burns 300+ extra calories. Plan adjusted. Batch cook Sunday so you have food ready without cooking after long shifts.` : "";
   const studentNote = isStudent ? `\n\n📚 *Student note:* Every meal in this plan is under 10 minutes and under 3 ingredients. Res tuck shop strategy — pilchards + brown bread is one of the best budget meals in SA. Maggi noodles + 1 egg is acceptable when budget is critical.` : "";
