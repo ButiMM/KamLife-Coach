@@ -116,17 +116,14 @@ export function slotFromSastHour(date: Date = new Date(), opts?: { nightWorker?:
 // EARLY-HOURS RETRO — the meal that lands in the small hours (00:00–04:59 SAST) almost always
 // belongs to the day that just ENDED, not a fresh one: a 4am "dinner" is LAST NIGHT's dinner
 // (2026-07-23 live: a dinner photo at 04:07 was filed under the new day, so the whole day's
-// numbers were wrong). Shift such a log back to the previous day — UNLESS the client explicitly
-// tied it to now/today, or it reads as a genuine early breakfast. Pure + conservative: only the
-// ambiguous small hours are ever touched, daytime logs are returned untouched. Known trade-off:
-// a true night-shift eater's 2–4am meal is rare next to people reporting the night just gone.
-export function effectiveMealLoggedAt(loggedAt: Date, rawMessage: string, mealLabel: string | null | undefined): Date {
-  const sastHour = new Date(loggedAt.getTime() + 2 * 3_600_000).getUTCHours();
-  if (sastHour >= 5) return loggedAt; // only 00:00–04:59 is ambiguous
-  const lo = (rawMessage || "").toLowerCase();
-  if (/\b(now|just|right now|just now|today|this morning|currently|about to|going to|tonight|early)\b/.test(lo)) return loggedAt;
-  if (mealLabel === "breakfast") return loggedAt; // a 3–4am breakfast is a real early start
-  return new Date(loggedAt.getTime() - 24 * 3_600_000); // → the day that just ended
+// numbers were wrong). Shift such a log back to the previous day. Daytime logs are returned untouched.
+export function effectiveMealLoggedAt(loggedAt: Date, _rawMessage: string, _mealLabel: string | null | undefined): Date {
+  // Before 05:00 the food day is the day that's ending, for everything, "this morning", "today" and "now" included
+  // (#582, CTO on #641): at 00:40 "this morning I had eggs" is the morning they haven't slept on yet. One rule, the
+  // same one mealDayStart reads with, so a total never mixes two days and never drops a meal it just wrote.
+  // Only the SEND clock moves: a day and time the client named ("On Monday at 04:00 I had breakfast") is theirs (#648 attack).
+  const sendClock = Math.abs(Date.now() - loggedAt.getTime()) < 15 * 60_000;
+  return sendClock && sastHour(loggedAt) < 5 ? new Date(loggedAt.getTime() - 24 * 3_600_000) : loggedAt;
 }
 
 // A CAPTION TIME IS A TIME, NOT A MEAL NAME — `slotFromCaptionTime` REMOVED (Cut 2, 2026-09-11).

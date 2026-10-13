@@ -86,6 +86,10 @@ OUT(`  client_facts stored: ${JSON.stringify(facts)}`);
 const prof = await q(`SELECT profile_notes FROM users WHERE id=$1`, [u2.id]).catch(() => []);
 OUT(`  users.profile_notes: ${JSON.stringify(prof)}`);
 for (const m of ["what workout should I do today?", "what should I eat for supper tonight?", "do you remember what I told you about my knee?"]) await say(u2, m);
+// L2/L3 (#636): a fact rides along with a meal; "fine now" and "forget that" end it, and nothing replaces it.
+for (const m of ["had pap and wors, my knee is sore today", "log my lunch, I'm on night shift this week", "my knee is fine now", "forget that I said I work nights"]) await say(u2, m);
+const live = await q(`SELECT kind, subject FROM client_facts WHERE user_id=$1 AND superseded_by IS NULL AND (valid_until IS NULL OR valid_until > now())`, [u2.id]).catch(e => [{ err: String(e) }]);
+OUT(`  client_facts still active: ${JSON.stringify(live)}`);
 
 OUT("\n════ DOES IT DO ANYTHING ════");
 const u3 = await freshUser({ name: "Lerato" });
