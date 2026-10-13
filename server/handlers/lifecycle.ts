@@ -1534,6 +1534,11 @@ export async function handlePendingCancel(ctx: { phone: string; message: string;
         reason: billing.detail,
         meta: { token, paymentReference: user.paymentReference ?? null },
       }).catch((e) => console.error("[CANCEL] adminEvents insert failed:", e));
+      // A billing cancel PayFast did not confirm is a founder task until done (#572), as the age gate's already is.
+      if (!billing.ok) await db.insert(escalations).values({
+        userId: user.id, reason: "billing", priority: "urgent", slaDeadline: (await import("../safety-detection")).escalationSLA("urgent"),
+        triggerMessage: `PayFast did NOT confirm ${name}'s cancel (${billing.detail}). Cancel their recurring billing by hand${token ? ` (token ${token})` : ""}.`.slice(0, 500),
+      }).catch((e) => console.error("[CANCEL] founder task failed:", e));
       const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
       if (coachAlertPhone) {
         const alertTo = `whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`;
