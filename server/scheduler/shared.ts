@@ -16,7 +16,7 @@ import { readHealthState } from "../health-state";
 import { provenanceGate, shadowDoor } from "../verifiers/response-gate";
 import { humanizeReply } from "../reply-hygiene";
 import { enforceOutboundTruth, prepareOutbound } from "../outbound-authority";
-import { templateSid, isValidTemplateSid, renderTemplateBody, WINDOW_RECOVERY_TEMPLATE } from "../whatsapp-templates";
+import { templateSid, isValidTemplateSid, renderTemplateBody } from "../whatsapp-templates";
 import { whatsappFrom, twilioClientForSend, type DeliveryResult } from "../outbound-delivery";
 
 export { db, pool };
@@ -402,21 +402,9 @@ export const FROM_NUMBER = whatsappFrom();
 // READ AT SEND TIME, NOT AT IMPORT (Cut 6 amendment, 2026-09-14). As a module-level const this
 // was captured once at boot, so setting TWILIO_SMS_NUMBER in Railway did nothing until the next
 // redeploy — and it made the whole fallback path untestable, which is a large part of why it went
-// so long reporting deliveries it had not made. Lazy, like whatsappFrom() and reengageTemplateSid()
-// in this same file, both of which were made lazy for the same reason.
+// so long reporting deliveries it had not made. Lazy, like whatsappFrom() in this same file, for the same reason.
 const smsFrom = () => (process.env.TWILIO_SMS_NUMBER || "").trim();
 
-// Approved WhatsApp template (Twilio Content API SID, "HX…") used to re-open a
-// conversation when a freeform proactive send is rejected for being OUTSIDE the
-// 24-hour customer-care window (Twilio error 63016). A template is the only message
-// WhatsApp allows outside that window. Empty until you have an approved template —
-// when unset, behaviour is unchanged (the 63016 path goes straight to SMS fallback).
-// Production-only: the sandbox has no templates, so this is a no-op there.
-//
-// Read through the registry rather than straight off process.env (2026-07-29): the text that
-// gets approved and the SID that gets used must be the same object, or the coach sends a
-// template nobody reviewed. server/whatsapp-templates.ts owns both.
-const reengageTemplateSid = () => templateSid(WINDOW_RECOVERY_TEMPLATE);
 
 // Twilio error codes that mean "WhatsApp channel is unavailable for this recipient"
 // (not transient network errors — these won't resolve with retry)
@@ -583,11 +571,6 @@ export interface WindowTemplate {
   name: string;
   /** Fills that template's {{1}},{{2}}… — sanitised and rendered like any other variables. */
   variables?: Record<string, string | number | null | undefined>;
-  /**
-   * This message or nothing (#563): if its own template cannot go, do not send the generic check-in in
-   * its place. The commitment check-in sets it, so a failed template is one missed ask, not two contacts.
-   */
-  noSubstitute?: boolean;
 }
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string, windowTemplate?: WindowTemplate): Promise<DeliveryResult> {
@@ -689,9 +672,8 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
     onChannelError: async (err: any) => {
       const e = err as { code?: number };
       if (!e?.code || !WA_CHANNEL_ERRORS.has(e.code)) return null;
-      // 63016 = freeform blocked for being OUTSIDE the 24-hour window. If an approved
-      // re-engagement template is configured, send THAT first — it re-opens the WhatsApp thread
-      // (preferred over SMS). Only on its failure do we drop to SMS. Other channel errors (not
+      // 63016 = freeform blocked for being OUTSIDE the 24-hour window. The message's own approved
+      // template goes if it has one; otherwise SMS with the real content. Other channel errors (not
       // opted in, region blocked) go straight to SMS as before.
       if (e.code === 63016) {
         // THE MESSAGE'S OWN TEMPLATE FIRST (Cut 6, 2026-09-14). Three approved templates existed
@@ -702,9 +684,9 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
         // recorded a delivery.
         //
         // When the caller names a template for THIS message, that one goes: the client reads
-        // their actual action, their actual sessions, their actual amount. Only when no template
-        // fits the message does the generic check-in run, and that outcome is `substituted`,
-        // which `deliveryAccepted` reads as false.
+        // their actual action, their actual sessions, their actual amount. When no template fits,
+        // nothing is put in its place (#327): the generic "Coach K checking in" was a different
+        // message, so the send drops to SMS with the real content, or is reported dropped.
         const matched = windowTemplate && templateSid(windowTemplate.name);
         if (matched) {
           console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending "${windowTemplate!.name}" with this message's own content`);
@@ -714,20 +696,7 @@ async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | unde
             });
             if (d !== "dropped") return "fallback";           // the real content reached them
           } catch {
-            console.warn(`[WA:WINDOW] "${windowTemplate!.name}" failed for ${to.slice(-8)} — trying the generic check-in`);
-          }
-        }
-        if (reengageTemplateSid() && !windowTemplate?.noSubstitute) {
-          console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending the GENERIC re-engagement template; this message's own content is NOT delivered`);
-          try {
-            const templateDelivery = await sendWhatsAppTemplate(to, reengageTemplateSid(), undefined, {
-              fallbackText: smsFallbackText, templateName: WINDOW_RECOVERY_TEMPLATE,
-            });
-            // NOT "fallback". The check-in is a different message from the one being sent, and a
-            // caller asking "did they get this?" must be told no.
-            return templateDelivery === "dropped" ? "dropped" : "substituted";
-          } catch {
-            console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
+            console.warn(`[WA:WINDOW] "${windowTemplate!.name}" failed for ${to.slice(-8)} — no substitute is sent (#327)`);
           }
         }
       }
@@ -846,16 +815,8 @@ export async function sendWhatsAppTemplate(
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER:TEMPLATE] → ${to.slice(-8)}: ${contentSid}`);
-      // THE RECORD SAYS WHICH MESSAGE THIS WAS (C17 evening). The generic check-in is the ONE
-      // template that is not the message its caller asked to send — it is the substitute that
-      // goes out when the window is shut and nothing content-matched exists. The body stored
-      // here was already honest (the rendered check-in, not the intended coaching), but the row
-      // was filed as PROACTIVE, indistinguishable from a message that actually landed. So
-      // "today's coaching never reached this client" was true in the world and unreadable in
-      // the ledger. A free-text discriminator, the same shape as the return nudge's
-      // `return_sick`/`return_away`: no migration, no live ledger rewritten, no new mechanism.
-      void logOutboundToHistory(to, logText, opts?.templateName === WINDOW_RECOVERY_TEMPLATE
-        ? "PROACTIVE_SUBSTITUTED" : "PROACTIVE"); // best-effort, non-blocking
+      // No send substitutes the generic check-in any more (#327); old PROACTIVE_SUBSTITUTED rows are still read.
+      void logOutboundToHistory(to, logText, "PROACTIVE"); // best-effort, non-blocking
     },
     onFailure: () => {
       recordTwilioFailure();
