@@ -380,6 +380,28 @@ REAL("\n10. A PROMISE MADE BEFORE A PREGNANCY OR EATING-DISORDER DISCLOSURE IS N
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+REAL("\n11. ON A COMMITMENT'S DUE DAY THE MORNING STANDS DOWN, SO THE CHECK-IN GOES OUT (#645)");
+// ════════════════════════════════════════════════════════════════════════
+// "I'll walk after work on Thursday". On Thursday the morning used the day's one slot and the evening's
+// "how did it go?" was capped away: the one thing we promised to follow up never went out.
+{
+  await reset();
+  stubTwilio(false);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  const { runMorningCheckin } = await import("../server/scheduler/jobs/morning");
+  await runMorningCheckin();
+  _resetOutboundDedupe();
+  await runEveningAccountability();
+  const sent = [...freeformSent(), ...templatesSent()];
+  chk(sent.length === 1 && (/you planned .*walk after work.*how did it go/i.test(sent[0]) || sent[0] === SID.checkin),
+    "Thursday's one message is the check-in: the morning stood down", JSON.stringify(sent));
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+}
+
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);
 REAL(failed ? `\npg-evening-delivery-acceptance: FAILED — ${failed} assertion(s)\n`
             : "\npg-evening-delivery-acceptance: GREEN\n");
