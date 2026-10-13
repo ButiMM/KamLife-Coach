@@ -236,6 +236,8 @@ export const mealLogs = pgTable(
     // one thing the client said. NULL = logged before lineage existed, and NOT backfilled —
     // a legacy row is genuinely a group of one, which is what it always was.
     sourceMessageId: text("source_message_id"),
+    // When the client SENT it (#637). Set once at insert; a correction never moves it, unlike xmin.
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => {
     return {

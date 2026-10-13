@@ -9,6 +9,7 @@ export const modelCalls = { n: 0 };
 
 const meal = (foodText: string, slot?: string) => ({ type: "LOG_MEAL", foodText, ...(slot ? { meal: slot } : {}), needsConfirmation: false });
 const fact = (kind: string, subject: string, statement: string) => ({ kind, subject, statement, detail: {}, valid_from: null, valid_until: null, corrects: null });
+const retire = (kind: string, subject: string, statement: string) => ({ kind, subject, statement, detail: {}, retires: true }); // #636
 const READINGS: Array<[RegExp, { family: string; actions?: unknown[]; facts?: unknown[] }]> = [
   [/^had pap and wors for lunch$/i, { family: "report", actions: [meal("pap and wors", "lunch")] }],
   [/^2 slices brown bread with peanut butter for breakfast$/i, { family: "report", actions: [meal("2 slices brown bread with peanut butter", "breakfast")] }],
@@ -23,6 +24,10 @@ const READINGS: Array<[RegExp, { family: string; actions?: unknown[]; facts?: un
   [/^what did I eat today\?$/i, { family: "question", actions: [{ type: "SHOW_MEALS" }] }],
   [/bad knee/i, { family: "report", facts: [fact("injury", "knee", "I have a bad knee, it gets sore on stairs")] }],
   [/night shifts/i, { family: "report", facts: [fact("schedule", "night shifts", "I work night shifts this month")] }],
+  [/^had pap and wors, my knee is sore today$/i, { family: "report", actions: [meal("pap and wors")], facts: [fact("injury", "knee", "my knee is sore today")] }],
+  [/^log my lunch, I'm on night shift this week$/i, { family: "report", facts: [fact("schedule", "night shifts", "I'm on night shift this week")] }],
+  [/^my knee is fine now$/i, { family: "report", facts: [retire("injury", "knee", "my knee is fine now")] }],
+  [/^forget that I said I work nights$/i, { family: "report", facts: [retire("schedule", "night shifts", "forget that I said I work nights")] }],
   [/^I have diabetes\. Had a kota for lunch$/i, { family: "report", actions: [meal("kota", "lunch")] }],
   [/^I don't eat fish$/i, { family: "report", facts: [fact("preference", "no fish", "I don't eat fish")] }],
   [/^I walked 6000 steps$/i, { family: "report", actions: [{ type: "LOG_STEPS", count: 6000 }] }],

@@ -62,10 +62,10 @@ async function withOpenAIRetry<T>(fn: () => Promise<T>, label = "openai"): Promi
   }
 }
 
-const openai = new OpenAI({
+const openai = metered(new OpenAI({
   // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
-});
+}), "gpt"); // every call priced where the daily cap reads (#570)
 
 // ── Prompt-injection sanitiser for user-supplied free-text fields ──
 // A user who types "ignore previous instructions" in their name/injury field could corrupt
@@ -1077,7 +1077,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   }
 
   try {
-    const response = await withOpenAIRetry(() => openai.chat.completions.create({
+    const response = await withOpenAIRetry(() => meterAs("coach", () => openai.chat.completions.create({
       model,
       max_tokens: maxTokens,
       // Voice rules are strict (word caps, banned phrases); temp 1.0 maximises rule-breaking.
@@ -1093,7 +1093,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
           content: userMessage
         }
       ]
-    }), "askCoachK");
+    })), "askCoachK");
     const usage = response.usage;
     if (usage) {
       const inputTokens = usage.prompt_tokens ?? 0;
@@ -1104,7 +1104,6 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
         : (inputTokens / 1000) * 0.005   + (outputTokens / 1000) * 0.015;
       const costZAR = costUSD * 18.5;
       console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
-      recordGptCost({ userId: user.id, model, feature: "coach", promptTokens: inputTokens, completionTokens: outputTokens });
     }
 
     const rawReply = response.choices[0]?.message?.content?.trim() || "Sorry, I missed that one — send it to me again?";
@@ -1329,7 +1328,7 @@ export async function classifyIntent(message: string, userId?: string): Promise<
   if (m.length > 500) return { intent: "OTHER", confidence: 0 };
 
   try {
-    const response = await withOpenAIRetry(() => openai.chat.completions.create({
+    const response = await withOpenAIRetry(() => meterAs("classify", () => openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 110,
       temperature: 0,
@@ -1389,7 +1388,7 @@ Examples:
         },
         { role: "user", content: m.slice(0, 300) },
       ],
-    }), "classifyIntent");
+    })), "classifyIntent");
 
     const raw = (response.choices[0]?.message?.content || "{}").trim().replace(/^```json?\s*|\s*```$/g, "");
     const parsed = JSON.parse(raw) as { intent?: string; confidence?: number; canonical?: string };
@@ -1404,7 +1403,6 @@ Examples:
     if (response.usage) {
       const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
       console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%)${canonical ? ` canon="${canonical.slice(0, 60)}"` : ""} tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)}${userId ? ` user:${userId.slice(-6)}` : ""}`);
-      recordGptCost({ userId: userId ?? null, model: "gpt-4o-mini", feature: "classify", promptTokens: response.usage.prompt_tokens ?? 0, completionTokens: response.usage.completion_tokens ?? 0 });
     }
 
     return { intent, confidence, canonical };
