@@ -281,7 +281,9 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
       if (action.type === "LOG_MEAL") written.push({ name: action.foodText, sid });
       const card = (exec.reply.match(/\[MEDIA:[^\]]+\]/) || [""])[0];
       if (!out.card) out.card = card;
-      if (!out.reply) out.reply = exec.reply.replace(card, "").trim();
+      // EVERY write's receipt, not the first (#532): a five-day catch-up told the coach only "Got it — oats and banana".
+      const said = exec.reply.replace(card, "").trim();
+      if (said && !out.reply.includes(said)) out.reply = [out.reply, said].filter(Boolean).join("\n");
     }
   }
   // SEVERAL MEALS IN ONE MESSAGE (7 Oct, founder: people send lists): the card drawn after the first meal held only that
@@ -406,7 +408,7 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     // fuel…") follows the new words, and is kept out of the composer's context so it is said once.
     const guard = user ? await (await import("../nutrition-guardrails")).nutritionGuardrailNudge(user) : "";
     if (guard) receipt = receipt.replace(guard.trim(), "");
-    pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 300)}`;
+    pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 900)}`;
     const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
