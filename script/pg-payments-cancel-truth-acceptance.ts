@@ -521,6 +521,9 @@ REAL("\n12. CODEX AUDIT #606 — a refund stays a refund, a pregnant payer gets 
   const Q = await makeClient("27820000983", "Queen Welcome");
   await postItn(signItn(itnFields(Q.digits, "COMPLETE", "tok-queen-1", "pf-queen-1", "alpha")), true);
   chk(/Welcome to KamLife Coach[\s\S]*Goal: fat loss/.test(sentTo(Q.phone)), "control: an ordinary new payer still gets the full welcome", JSON.stringify(sentTo(Q.phone).slice(0, 200)));
+  const toQ = wire.filter(w => w.to === Q.phone);
+  chk(toQ.length === 1 && /reply \*workout\*/.test(toQ[0].body) && !/morning and evening/.test(toQ[0].body),
+    "…in ONE message, with Day 1 a \"workout\" away, not four more bubbles (C2)", `${toQ.length} message(s): ${JSON.stringify(toQ.map(w => w.body.slice(0, 60)))}`);
   _setTwilioClientForTests(null);
 
   const R = await makeClient("27820000984", "Refilwe New");
