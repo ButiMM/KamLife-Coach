@@ -195,9 +195,9 @@ export async function settleCommitment(userId: string): Promise<Awaited<ReturnTy
   return { ...c, state: "kept" };
 }
 /** Inside WhatsApp's 24-hour window: their last message, as the record received it. */
-export async function inWhatsAppWindow(userId: string): Promise<boolean> {
+export async function inWhatsAppWindow(userId: string, at = Date.now()): Promise<boolean> {
   const [r] = await db.select({ at: sql<Date | null>`max(${clientEvents.receivedAt})` }).from(clientEvents).where(eq(clientEvents.userId, userId));
-  return !!r?.at && Date.now() - new Date(r.at).getTime() < 23 * 3600_000;
+  return !!r?.at && at - new Date(r.at).getTime() < 23 * 3600_000;
 }
 
 /** Parse and validate the extractor's answer. Anything malformed is dropped, never repaired. */
