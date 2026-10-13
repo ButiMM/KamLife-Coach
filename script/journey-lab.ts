@@ -30,7 +30,7 @@ console.log = console.warn = console.error = (...a: any[]) => { LOG.push(a.map(S
 
 const { pool } = await import("../server/db");
 const { handleMessage } = await import("../server/routes");
-const { sastDayKey, effectiveMealLoggedAt } = await import("../server/sast");
+const { sastDayKey, effectiveMealLoggedAt, mealDayStart } = await import("../server/sast");
 // The instrument's own definition of "no door claimed this", not a copy of it. See admin-turns.ts.
 const { FALLBACK_REPLY, buildCoachHealthBrief } = await import("../server/routes/admin-turns");
 
@@ -204,7 +204,9 @@ await journey("1 · DAILY TRUTH — meals + steps + weight + question, with a co
   const t1 = await say(u.id, u.phone, "This morning I had 3 eggs and 2 slices of toast");
   const m1 = await meals(u.id);
   ok(m1.length === 1, `the meal was written once (${m1.length} rows)`);
-  ok(!!m1[0] && dayOf(m1[0]) === today, `it landed on today's SAST day`, `${m1[0] && dayOf(m1[0])} vs ${today}`);
+  // The food day, not the calendar day: before 05:00 it is the day that's ending, "this morning" included (CTO on #641).
+  const foodDay = sastDayKey(mealDayStart());
+  ok(!!m1[0] && dayOf(m1[0]) === foodDay, `it landed on today's food day`, `${m1[0] && dayOf(m1[0])} vs ${foodDay}`);
   ok(!!m1[0] && m1[0].kcal_int > 0 && m1[0].protein_int > 0,
      `the row carries extracted energy and protein`, `${m1[0]?.kcal_int}kcal / ${m1[0]?.protein_int}p`);
   ok(!!m1[0] && itemNames(m1[0]).some(n => /egg/i.test(n)),
@@ -546,7 +548,7 @@ await journey("6 · MESSY REAL LIFE — SA phrasing, several facts in one breath
     "Eish coach, today was rough. I had pap and chicken livers for lunch and I walked 6400 steps. Feeling flat.");
   const m1 = await meals(u.id);
   ok(m1.length === 1, `the meal in the middle of the sentence was logged once (${m1.length})`);
-  ok(!!m1[0] && dayOf(m1[0]) === today, `it landed on today`);
+  ok(!!m1[0] && dayOf(m1[0]) === sastDayKey(mealDayStart()), `it landed on today's food day`); // the ending day before 05:00 (#641)
   const n1 = m1[0] ? itemNames(m1[0]) : [];
   ok(n1.some(n => /pap/i.test(n)), `pap was kept`, JSON.stringify(n1));
   ok(n1.some(n => /liver/i.test(n)), `chicken livers survived as their own food`, JSON.stringify(n1));
