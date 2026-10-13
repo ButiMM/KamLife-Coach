@@ -121,7 +121,9 @@ export function effectiveMealLoggedAt(loggedAt: Date, _rawMessage: string, _meal
   // Before 05:00 the food day is the day that's ending, for everything, "this morning", "today" and "now" included
   // (#582, CTO on #641): at 00:40 "this morning I had eggs" is the morning they haven't slept on yet. One rule, the
   // same one mealDayStart reads with, so a total never mixes two days and never drops a meal it just wrote.
-  return sastHour(loggedAt) < 5 ? new Date(loggedAt.getTime() - 24 * 3_600_000) : loggedAt;
+  // Only the SEND clock moves: a day and time the client named ("On Monday at 04:00 I had breakfast") is theirs (#648 attack).
+  const sendClock = Math.abs(Date.now() - loggedAt.getTime()) < 15 * 60_000;
+  return sendClock && sastHour(loggedAt) < 5 ? new Date(loggedAt.getTime() - 24 * 3_600_000) : loggedAt;
 }
 
 // A CAPTION TIME IS A TIME, NOT A MEAL NAME — `slotFromCaptionTime` REMOVED (Cut 2, 2026-09-11).

@@ -4779,9 +4779,11 @@ test("macro status: 'Macros' gives the full four-line rundown", () => {
 // effectiveMealLoggedAt — a 4am "dinner" is LAST NIGHT's (2026-07-23 live: a dinner photo at
 // 04:07 was filed under the new day, wrecking the day's numbers).
 // ============================================================
+/** The clock reads `at`: the message was sent then (effectiveMealLoggedAt moves only the send clock, #648). */
+const sentAt = <T>(at: Date, fn: () => T): T => { const real = Date.now; Date.now = () => at.getTime(); try { return fn(); } finally { Date.now = real; } };
 test("early-hours: a 4am dinner is dated to the previous day", () => {
   const at = new Date(Date.UTC(2026, 6, 23, 2, 7)); // 04:07 SAST, Thu 23 Jul
-  const eff = effectiveMealLoggedAt(at, "[Photo]", "dinner");
+  const eff = sentAt(at, () => effectiveMealLoggedAt(at, "[Photo]", "dinner"));
   assert.equal(sastDayStart(eff).getTime(), sastDayStart(new Date(at.getTime() - 86_400_000)).getTime(), "→ Wed 22");
   assert.notEqual(sastDayStart(eff).getTime(), sastDayStart(at).getTime(), "not the same day it arrived");
 });
@@ -4789,12 +4791,16 @@ test("early-hours: daytime logs are never shifted", () => {
   const lunch = new Date(Date.UTC(2026, 6, 23, 11, 0)); // 13:00 SAST
   assert.equal(effectiveMealLoggedAt(lunch, "rice and chicken", "lunch").getTime(), lunch.getTime());
 });
+test("early-hours: a day and time the client named stays theirs (#648 attack: \"On Monday at 04:00 I had breakfast\")", () => {
+  const monday4 = new Date(Date.UTC(2026, 9, 12, 2, 0)); // Mon 12 Oct 04:00 SAST, stated, read on a later day
+  assert.equal(effectiveMealLoggedAt(monday4, "On Monday at 04:00 I had breakfast before my shift", "breakfast").getTime(), monday4.getTime());
+});
 test("early-hours: before 05:00 'this morning', 'now' and a breakfast are the ending day too (CTO on #641)", () => {
   const at = new Date(Date.UTC(2026, 6, 22, 22, 40)); // 00:40 SAST, Thu 23 Jul
   for (const [msg, label] of [["this morning I had 3 eggs", "breakfast"], ["having my dinner now", "dinner"], ["Breakfast before my shift", "breakfast"]] as const)
-    assert.equal(sastDayStart(effectiveMealLoggedAt(at, msg, label)).getTime(), sastDayStart(new Date(at.getTime() - 86_400_000)).getTime(), msg);
+    assert.equal(sastDayStart(sentAt(at, () => effectiveMealLoggedAt(at, msg, label))).getTime(), sastDayStart(new Date(at.getTime() - 86_400_000)).getTime(), msg);
   const six = new Date(Date.UTC(2026, 6, 23, 4, 0)); // 06:00 SAST: a real new day
-  assert.equal(effectiveMealLoggedAt(six, "this morning I had 3 eggs", "breakfast").getTime(), six.getTime());
+  assert.equal(sentAt(six, () => effectiveMealLoggedAt(six, "this morning I had 3 eggs", "breakfast")).getTime(), six.getTime());
 });
 
 // ============================================================
