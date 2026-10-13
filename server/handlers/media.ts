@@ -19,7 +19,7 @@ import {
   buildMediaTrace, withTimeout,
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
-import { askCoachK } from "../gpt";
+import { askCoachK, meterAs } from "../gpt";
 import { cleanSATranscript, stripKnownNoSpeechMarkers, transcriptFailsAdmission, whisperSegmentMetrics, type VoiceQuality } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
@@ -52,7 +52,7 @@ import { commitFoodLog } from "./food-context";
 import { reconcileVisionMeal, itemsFromVisionText } from "../serving-units";
 import { tryLogDistanceScreenshot } from "./distance-log";
 import { encodePendingFood } from "../food-referent";
-import { recordServiceCost, selectVisionModel, estimateVisionCostUSD } from "../cost-tracking";
+import { selectVisionModel, estimateVisionCostUSD } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
@@ -782,7 +782,7 @@ export async function handleMediaMessage(ctx: {
       const foodVisionStart = Date.now();
       photoStage = "vision";
       // #596: if the paid vision model is refused, the one production already answers text with reads it.
-      const foodVision = (model: string, img = { b64: base64, ct: contentType }) => withTimeout("food_vision", 22000, () => openai.chat.completions.create({
+      const foodVision = (model: string, img = { b64: base64, ct: contentType }) => withTimeout("food_vision", 22000, () => meterAs("vision", () => openai.chat.completions.create({
         model,
         max_tokens: foodVisionDecision.maxTokens,
         messages: [
@@ -801,7 +801,7 @@ export async function handleMediaMessage(ctx: {
             ],
           },
         ],
-      }));
+      })));
       let visionResponse = await foodVision(foodVisionDecision.model).catch(async (e) => {
         if (foodVisionDecision.model === "gpt-4o-mini" || /timeout/i.test(String((e as Error)?.message))) throw e;
         console.error(`[MEDIA][${mediaTrace}] food_vision ${foodVisionDecision.model} refused, retrying gpt-4o-mini:`, (e as Error)?.message);
@@ -810,7 +810,6 @@ export async function handleMediaMessage(ctx: {
       const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
       const foodVisionMs = Date.now() - foodVisionStart;
       console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
-      recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
       // The AI saying it cannot see a SHRUNK photo means the shrink broke it: one retry with the original (7 Oct, live).
       if (shrunk.resized && ["can't see", "can’t see", "cannot see", "unable to see", "can't view", "no image"].some(w => (visionResponse.choices[0]?.message?.content || "").toLowerCase().includes(w))) {

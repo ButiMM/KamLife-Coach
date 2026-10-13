@@ -122,7 +122,7 @@ export function returnProtocolLines(): string {
 /** The whole comeback block — heading, ramp, and the reassurance that nothing was lost. */
 export function comebackPlan(firstName = ""): string {
   const fn = firstName ? `${firstName}, ` : "";
-  return `${fn}here's exactly how we do this — no guessing.\n\n${returnProtocolLines()}\n\n*Nothing resets.* Your programme, your week and your streak are exactly where you left them.\n\nStrength comes back faster than it left, but it takes 2–3 weeks — not one session. Rushing it is how people get hurt in week one.`;
+  return `${fn}here's exactly how we do this — no guessing.\n\n${returnProtocolLines()}\n\n*Nothing resets.* Your programme, your week and your streak are exactly where you left them.\n\nStrength comes back faster than it left, but it takes 2–3 weeks, not a single workout. Rushing it is how people get hurt in week one.`;
 }
 
 /**
