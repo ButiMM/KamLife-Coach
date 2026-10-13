@@ -316,7 +316,12 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   chk(m2.length === 2 && m2.some(r => /kota/i.test(r)) && m2.some(r => /pap/i.test(r)) && k1.includes(NEW) && k2.includes(NEW), "\"Kota from the spaza\" and \"Ndidle ipapa nenyama\" each write a meal, and the new coach answers after the write", `${JSON.stringify(m2)} | ${k1.slice(0, 120)} | ${k2.slice(0, 120)}`);
   const ks = await say(K, "Ndihambe 6200 steps namhlanje"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(st === 6200 && ks.includes(NEW), "isiXhosa steps are written by the step tool", `${st} | ${ks.slice(0, 120)}`);
-  const kv = await say(K, "Some rice from mama's pot"), held = (await meals()).length, ky = await say(K, "yes"), after = (await meals()).length;
+  const kv = await say(K, "Some rice from mama's pot"), held = (await meals()).length;
+  // STORED, NOT IN THE PROCESS (#322): the offer is a row, so a "yes" sent across a redeploy still finds it.
+  const parked = (await pool.query("SELECT action->>'foodText' f FROM pending_confirms p JOIN users u ON u.id = p.user_id WHERE u.phone_number = $1", [K])).rows[0]?.f;
+  chk(parked === "some rice", "the offer waiting for \"yes\" is stored, so it survives a redeploy (#322)", String(parked));
+  const ky = await say(K, "yes"), after = (await meals()).length;
+  chk(Number((await pool.query("SELECT COUNT(*)::int n FROM pending_confirms p JOIN users u ON u.id = p.user_id WHERE u.phone_number = $1", [K])).rows[0].n) === 0, "…and taking it removes it: a second \"yes\" never double-fires");
   chk(/reply \*yes\*/i.test(kv) && held === 2 && after === 3 && ky.trim().length > 0, "a vague amount asks first; the client's \"yes\" writes it (the cohort gate is gone)", `${held} → ${after} | ${kv.slice(0, 120)} | ${ky.slice(0, 120)}`);
   const before = (await meals()).length, rb = await say(K, "Ndisele i-Red Bull"), withRb = await meals();
   chk(withRb.length === before + 1 && withRb.some(r => /red bull/i.test(r)) && rb.includes(NEW), "a drink read as a meal is written (the writer is handed \"I had …\", #593)", `${before} → ${withRb.length} | ${rb.slice(0, 120)}`);

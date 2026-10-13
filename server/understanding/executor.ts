@@ -78,23 +78,23 @@ export function _resetExecutorDedup(): void { _done.clear(); }
 // PENDING CONFIRMATIONS — when confidence is low the executor ASKS ("reply yes to log it")
 // instead of writing. Until now the offered action was parked NOWHERE, so the client's "yes"
 // landed on an amnesiac engine and looped (2026-07-23 live: "Reply yes" → "Yes" → "nothing
-// removed, recounted"). Park it here, keyed by user, short TTL — the confirm is a live
-// back-and-forth, not durable state. Lost on restart → the "yes" simply flows to normal
-// understanding, never a wrong write.
-const _pending = new Map<string, { action: CoachAction; at: number }>();
-const PENDING_TTL_MS = 15 * 60_000;
-export function setPendingConfirm(userId: string, action: CoachAction): void {
-  _pending.set(userId, { action, at: Date.now() });
-  if (_pending.size > 5000) _pending.clear();
+// removed, recounted"). Parked per client with a short TTL. STORED, not in-process (#322): the map
+// was wiped on every Railway deploy, so a "yes" sent across a redeploy found nothing.
+const PENDING_TTL = "15 minutes";
+export async function setPendingConfirm(userId: string, action: CoachAction): Promise<void> {
+  const [{ db }, { pendingConfirms }, { sql }] = await Promise.all([import("../db"), import("../../shared/schema"), import("drizzle-orm")]);
+  await db.insert(pendingConfirms).values({ userId, action: action as any })
+    .onConflictDoUpdate({ target: pendingConfirms.userId, set: { action: action as any, createdAt: sql`now()` } })
+    .catch((e: any) => console.warn("[PENDING_CONFIRM] not stored:", e?.message || e));
 }
-/** Remove and return the parked action, or null if none / expired. */
-export function takePendingConfirm(userId: string): CoachAction | null {
-  const p = _pending.get(userId);
-  _pending.delete(userId);
-  if (!p || Date.now() - p.at > PENDING_TTL_MS) return null;
-  return p.action;
+/** Remove and return the parked action, or null if none / expired (judged on the database's clock). */
+export async function takePendingConfirm(userId: string): Promise<CoachAction | null> {
+  const [{ db }, { pendingConfirms }, { eq, sql }] = await Promise.all([import("../db"), import("../../shared/schema"), import("drizzle-orm")]);
+  const [p] = await db.delete(pendingConfirms).where(eq(pendingConfirms.userId, userId))
+    .returning({ action: pendingConfirms.action, fresh: sql<boolean>`${pendingConfirms.createdAt} > now() - ${PENDING_TTL}::interval` })
+    .catch(() => [] as any[]);
+  return p && p.fresh ? (p.action as CoachAction) : null;
 }
-export function _resetPendingConfirm(): void { _pending.clear(); }
 
 // A short confirmation when confidence is below the bar — we ask, we don't silently write.
 function confirmQuestion(action: CoachAction, user: any): string {

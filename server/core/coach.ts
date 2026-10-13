@@ -272,7 +272,7 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
     // the model answered without the programme (founder's Monday plan, item 4).
     if (!exec.performed && !exec.confirmed && !exec.unwritten && !exec.skipped && !exec.error && exec.reply && READS.has(action.type)) out.reply = [out.reply, exec.reply].filter(Boolean).join("\n\n");
     if (exec.confirmed && !out.confirm) {
-      setPendingConfirm(user.id, action);
+      await setPendingConfirm(user.id, action);
       await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
       out.confirm = exec.reply;
     }
