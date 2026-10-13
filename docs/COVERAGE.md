@@ -15,69 +15,70 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 ### A. What the client sends
 | Row | What testers need | Status | What's left | Where | Week |
 |---|---|---|---|---|---|
-| A1 | A meal in words is logged (any language, any phrasing) | Built (#593, #597, #618, #619); trace proves the writes with a stub model | Correction plus new meal in one message (#624, PR #631 has 2 Codex P1s); same meal, same calories (#326); receipt cut to 300 chars in the coach's context (#532); live proof | #624 #326 #532 | B, I |
-| A2 | Corrections ("Hayi, it was rice") | Built (#621, #604) | #624 (mixed correction plus meal) | #624 | B |
-| A3 | Food photo | Built (#605, #613, #615) | Live proof on the founder's phone: a plate and black coffee | #596 | I |
-| A4 | Voice note in any language | Open: the real audio path is not proven | Prove the real Twilio audio path, isiZulu and Setswana | #330 | G |
-| A5 | Steps, distance screenshot | Built (steps proven in trace) | Screenshot path not proven | — | B |
-| A6 | Water, sleep | Water built; sleep has no new-coach action | Sleep via the coach | — | B |
-| A7 | Weigh-in; progress photos | Weigh-in built (#594, #620) | Progress photos have no action | — | B |
-| A8 | Workout done, show today's workout | Built (#618, #623) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record, #568) | #568 | C, L |
-| A9 | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
-| A10 | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach | #568 | C |
-| A11 | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7) | — | I |
-| A12 | Goal change, "am I on track" | Partly old (`misc-commands`) | SET_GOAL through the coach with confirm; trace case | #568 | C |
-| A13 | **Memory**: uses what they told it | Built: facts stored and read every turn (Codex verified). **Open: "forget X" can't retire a fact (#636, Codex 12 Oct)** | Old doors don't read it (#568); facts inside other messages (L2); "fine now" and "forget X" (L3); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
-| A14 | Reminders | Built (#537) | — | — | — |
-| A15 | Sick or injured pause, pain | Old `sick-flow` | Through the coach; trace case | — | B |
-| A16 | Stats, "how was my week" | Built (new coach, from the ledger) | — | — | I |
-| A17 | Off-topic redirect | Built | A coaching word vetoes a real off-topic ask | #354 | D |
-| A18 | SA languages everywhere | Built (11 gate cases, isiXhosa in trace) | Live proof per language | — | I |
-| A19 | Promises followed up | Built (#545, #564, #629) | Shame filter on the reply after a miss | #563 | D |
+| **A1** | A meal in words is logged (any language, any phrasing) | Built (#593, #597, #618, #619); trace proves the writes with a stub model | Correction plus new meal in one message (#624, PR #631 has 2 Codex P1s); same meal, same calories (#326); receipt cut to 300 chars in the coach's context (#532); live proof | #624 #326 #532 | B, I |
+| **A2** | Corrections ("Hayi, it was rice") | Built (#621, #604) | #624 (mixed correction plus meal) | #624 | B |
+| **A3** | Food photo | Built (#605, #613, #615) | Live proof on the founder's phone: a plate and black coffee | #596 | I |
+| **A4** | Voice note in any language | Open: the real audio path is not proven | Prove the real Twilio audio path, isiZulu and Setswana | #330 | G |
+| **A5** | Steps, distance screenshot | Built (steps proven in trace) | Screenshot path not proven | — | B |
+| **A6** | Water, sleep | Water built; sleep has no new-coach action | Sleep via the coach | — | B |
+| **A7** | Weigh-in; progress photos | Weigh-in built (#594, #620) | Progress photos have no action | — | B |
+| **A8** | Workout done, show today's workout | Built (#618, #623) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record, #568) | #568 | C, L |
+| **A9** | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
+| **A10** | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach | #568 | C |
+| **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7) | — | I |
+| **A12** | Goal change, "am I on track" | Partly old (`misc-commands`) | SET_GOAL through the coach with confirm; trace case | #568 | C |
+| **A13** | **Memory**: uses what they told it | Built: facts stored and read every turn (Codex verified). **Open: "forget X" can't retire a fact (#636, Codex 12 Oct)** | Old doors don't read it (#568); facts inside other messages (L2); "fine now" and "forget X" (L3); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
+| **A14** | Reminders | Built (#537) | — | — | — |
+| **A15** | Sick or injured pause, pain | Old `sick-flow` | Through the coach; trace case | — | B |
+| **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | — | — | I |
+| **A17** | Off-topic redirect | Built | A coaching word vetoes a real off-topic ask | #354 | D |
+| **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in trace) | Live proof per language | — | I |
+| **A19** | Promises followed up | Built (#545, #564, #629) | Shame filter on the reply after a miss | #563 | D |
 
 ### B. What the coach sends first (**proactive**)
 | Row | What testers need | Status | What's left | Where | Week |
 |---|---|---|---|---|---|
-| B1 | Morning message, useful, never generic | Built, one coaching check-in a day | Due-day morning plus evening (Grok 6): verify | #563 | F |
-| B2 | Evening | Built | "They trained but logged no food, evening says silent" (Grok 4): verify fixed | #563 | F |
-| B3 | Monday weigh-in | Built | Ask recorded before it's delivered | #297 | B |
-| B4 | Weekly true story | Scheduled (#517) | In the coach's words, from the record | — | F |
-| B5 | Programme advance | Old | Coach's words | #319 | F |
-| B6 | Welcome back after silence | Built, not proven | Trace case | #319 | F |
-| B7 | Reminders fire | Built | — | — | — |
-| B8 | Monthly narrative | Retired (#511) | — | — | — |
-| B9 | Onboarding catch-ups | Old | Coach's words | — | F |
-| B10 | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
-| B11 | Outside 24h: approved template or nothing | Open: generic template substitution still reachable (Codex R7) | No generic substitute; check-in template SID approved (founder) | #327 #415 | F, J |
-| B12 | Opt-out on every path | Built | — | — | — |
+| **B1** | Morning message, useful, never generic | Built, one coaching check-in a day | Due-day morning plus evening (Grok 6): verify | #563 | F |
+| **B2** | Evening | Built | "They trained but logged no food, evening says silent" (Grok 4): verify fixed | #563 | F |
+| **B3** | Monday weigh-in | Built | Ask recorded before it's delivered | #297 | B |
+| **B4** | Weekly true story | Scheduled (#517) | In the coach's words, from the record | — | F |
+| **B5** | Programme advance | Old | Coach's words | #319 | F |
+| **B6** | Welcome back after silence | Built, not proven | Trace case | #319 | F |
+| **B7** | Reminders fire | Built | — | — | — |
+| **B8** | Monthly narrative | Retired (#511) | — | — | — |
+| **B9** | Onboarding catch-ups | Old | Coach's words | — | F |
+| **B10** | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
+| **B11** | Outside 24h: approved template or nothing | Open: generic template substitution still reachable (Codex R7) | No generic substitute; check-in template SID approved (founder) | #327 #415 | F, J |
+| **B12** | Opt-out on every path | Built | — | — | — |
 | — | Every scheduled send through one owner | Open | — | #319 | F |
 
 ### C. Money, trust, safety
 | Row | What testers need | Status | What's left | Where | Week |
 |---|---|---|---|---|---|
-| C1 | Signup: three natural questions, no "reply 1/2/3" | **Open: still numeric menus** (Codex) | Natural onboarding; keep consent and age gates | — | E |
-| C2 | Pay: R199, one clear message | Price built (#576, #617) | Payment welcome is five bubbles (Codex) | — | E |
-| C3 | Cancel and refund do what they say | Built (#617) | An owed refund or unconfirmed cancel shows every morning | #572 | E |
-| C4 | Delete my data | Built | Failed backups never expire (R8) | #611, PR #625 | H |
-| C5 | Under 18 | Built (#574) | — | — | — |
-| C6 | Pregnancy, ED, crisis, medication | Built (#579, #617, #629) | "Can I take an antibiotic…" phrasing; nutrition direction with no professional | #353 #329 | D |
-| C7 | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
-| C8 | Referrals | Old | Coach's words | — | E |
+| **C1** | Signup: three natural questions, no "reply 1/2/3" | **Open: still numeric menus** (Codex) | Natural onboarding; keep consent and age gates | — | E |
+| **C2** | Pay: R199, one clear message | Price built (#576, #617) | Payment welcome is five bubbles (Codex) | — | E |
+| **C3** | Cancel and refund do what they say | Built (#617) | An owed refund or unconfirmed cancel shows every morning | #572 | E |
+| **C4** | Delete my data | Built | Failed backups never expire (R8) | #611, PR #625 | H |
+| **C5** | Under 18 | Built (#574) | — | — | — |
+| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629) | "Can I take an antibiotic…" phrasing; nutrition direction with no professional | #353 #329 | D |
+| **C7** | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
+| **C8** | Referrals | Old | Coach's words | — | E |
 
 ### D. Foundation, cost and quality
 | Row | Need | Status | What's left | Where | Week |
 |---|---|---|---|---|---|
-| D1 | One door: only floors and the coach answer | Open: old doors still answer talk | Inventory and delete | #568 | C |
-| D2 | One client record | Partly (D2b #565) | `memory.ts` (904 lines) and other stores | #568 | C |
-| D3 | One schema | Open | — | #343 | H |
-| D4 | Backups restore-tested | Built | R8 (above) | #611 | H |
-| D5 | Stale docs | Open | Archive | #331 | H |
-| D7 | **Coach Health**: every live turn scored, worst five to the founder at 07:00 | Built (#573, #584) | One-tap "bad reply" flag from testers | #360 | K |
-| D8 | **Cost**: every model call counted and capped | Open: the new coach's and photo calls aren't counted | PR #626, then my daily cost-per-client line | #570 PR #626 | H |
-| D9 | Dead code | Open: 8 files, 4,068 lines; server 71k vs 64.5k checkpoint | Delete with #568 | #568 | C |
-| D10 | Admin pages | Unchecked | Check escalations and finance pages | — | H |
-| D11 | CI can't spend production's AI budget | Built | — | — | — |
-| D12 | **Retention**: still here at 14 and 30 days | **Open: not measured anywhere** | One number in the 07:00 report | #423 | F |
+| **D1** | One door: only floors and the coach answer | Open: old doors still answer talk | Inventory and delete | #568 | C |
+| **D2** | One client record | Partly (D2b #565) | `memory.ts` (904 lines) and other stores | #568 | C |
+| **D3** | One schema | Open | — | #343 | H |
+| **D4** | Backups restore-tested | Built | R8 (above) | #611 | H |
+| **D5** | Stale docs | Open | Archive | #331 | H |
+| **D6** | Gate integrity: PR code never grades itself | Open | Trusted grader; the held-out set owned by the CTO or founder, not the builder | #368 | K |
+| **D7** | **Coach Health**: every live turn scored, worst five to the founder at 07:00 | Built (#573, #584) | One-tap "bad reply" flag from testers | #360 | K |
+| **D8** | **Cost**: every model call counted and capped | Open: the new coach's and photo calls aren't counted | PR #626, then my daily cost-per-client line | #570 PR #626 | H |
+| **D9** | Dead code | Open: 8 files, 4,068 lines; server 71k vs 64.5k checkpoint | Delete with #568 | #568 | C |
+| **D10** | Admin pages | Unchecked | Check escalations and finance pages | — | H |
+| **D11** | CI can't spend production's AI budget | Built | — | — | — |
+| **D12** | **Retention**: still here at 14 and 30 days | **Open: not measured anywhere** | One number in the 07:00 report | #423 | F |
 | — | Pending answers survive a redeploy | Open | — | #322 | C |
 | — | Tests fail after midnight | Open | — | #404 | A |
 | — | Each piece of advice linked to what happened next | Open | — | #369 | K |
