@@ -5874,6 +5874,7 @@ test("scope: off-domain asks are declined without a model", () => {
     "Can you help me write my CV for a job application?", "Should I put my savings into bitcoin this month?",
     "Please write me an essay about the history of Soweto for school", "can you help me fix this python code that keeps crashing",
     "give me betting tips for the weekend", "help me with my homework please",
+    "Please write a business plan for my gym", "Can you write me a cover letter for a gym job?", // #354: a coaching word does not veto the ask
   ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
 });
 test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
