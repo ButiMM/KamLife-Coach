@@ -69,6 +69,7 @@ const groups: Record<string, string[]> = {
     "Ndidle ipapa nenyama",
     "just finished 2 pieces of KFC and a small chips",
     "no it was chicken not beef",
+    "dinner was the same as lunch",
     "what did I eat today?",
     "I have diabetes. Had a kota for lunch",
   ],
@@ -85,10 +86,14 @@ OUT(`  client_facts stored: ${JSON.stringify(facts)}`);
 const prof = await q(`SELECT profile_notes FROM users WHERE id=$1`, [u2.id]).catch(() => []);
 OUT(`  users.profile_notes: ${JSON.stringify(prof)}`);
 for (const m of ["what workout should I do today?", "what should I eat for supper tonight?", "do you remember what I told you about my knee?"]) await say(u2, m);
+// L2/L3 (#636): a fact rides along with a meal; "fine now" and "forget that" end it, and nothing replaces it.
+for (const m of ["had pap and wors, my knee is sore today", "log my lunch, I'm on night shift this week", "my knee is fine now", "forget that I said I work nights"]) await say(u2, m);
+const live = await q(`SELECT kind, subject FROM client_facts WHERE user_id=$1 AND superseded_by IS NULL AND (valid_until IS NULL OR valid_until > now())`, [u2.id]).catch(e => [{ err: String(e) }]);
+OUT(`  client_facts still active: ${JSON.stringify(live)}`);
 
 OUT("\n════ DOES IT DO ANYTHING ════");
 const u3 = await freshUser({ name: "Lerato" });
-for (const m of ["hi", "help", "I'm struggling this week", "how am I doing?", "what are my targets?", "I walked 6000 steps", "I weigh 87kg today", "I did a 30 min home workout", "remind me to drink water at 3pm", "thanks coach"]) await say(u3, m);
+for (const m of ["hi", "help", "I'm struggling this week", "how am I doing?", "what are my targets?", "I walked 6000 steps", "I weigh 87kg today", "I did a 30 min home workout", "I slept 5 hours last night", "remind me to drink water at 3pm", "thanks coach"]) await say(u3, m);
 OUT("\n════ WORKOUTS ════");
 const u4 = await freshUser({ name: "Thandi" });
 for (const m of ["what's my workout today?", "Had pap and wors for lunch and did a 30 min home workout", "2"]) await say(u4, m);

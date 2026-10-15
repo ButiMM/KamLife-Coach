@@ -192,8 +192,8 @@ REAL("\n2. THE DEFECT — OUTSIDE the window, the coaching does not reach them")
   const bodies = freeformSent();
   chk(bodies.length === 1 && isEveningCoaching(bodies[0]),
     "the coaching is attempted as freeform first", JSON.stringify(bodies.length));
-  chk(templatesSent().includes(SID.reengage),
-    "…is rejected by the closed window, and the generic check-in goes instead",
+  chk(!templatesSent().includes(SID.reengage),
+    "…is rejected by the closed window, and the generic check-in is NOT sent in its place (#327)",
     JSON.stringify(templatesSent()));
   chk(!templatesSent().includes(SID.daily),
     "the MORNING template is not pressed into evening service — it opens \"Morning {{1}}\"",
@@ -201,39 +201,19 @@ REAL("\n2. THE DEFECT — OUTSIDE the window, the coaching does not reach them")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n3. THE RECORD DOES NOT CLAIM THE COACHING LANDED");
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-// The body stored was already honest. The INTENT was not: filed as PROACTIVE, a substitution was
-// indistinguishable from a message that reached the client, so "today's coaching never arrived"
-// was true in the world and unreadable in the ledger.
+REAL("\n3. NOTHING IS RECORDED AS SENT, AND THE CALLER IS TOLD SO (#327)");
+// ═══════════════════════════════════════════════════════════════════════════
+// The generic "Coach K checking in" is a different message from the coaching, so it never goes in
+// its place. With no template of its own and no SMS number, the coaching did not land: the
+// outcome is `dropped`, and no row claims a delivery.
 {
   const h = await history();
-  chk(h.length === 1, "exactly one row is written for the substituted send", JSON.stringify(h.length));
-  chk(!!h[0] && isCheckIn(h[0].body),
-    "the stored body is the check-in the client READ", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
-  chk(!!h[0] && !isEveningCoaching(h[0].body),
-    "…and NOT the coaching they never saw", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
-  chk(!!h[0] && h[0].intent === "PROACTIVE_SUBSTITUTED",
-    "the status says a substitute went out, not a delivery", JSON.stringify(h.map(r => r.intent)));
-}
-
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n3b. AND THE CALLER IS TOLD SO — the outcome and the record must agree");
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-// The intent discriminator is only half the truth: a caller that asks "did this reach them?" must
-// hear no, or it will act on a message the client never read. Graded through the transport
-// directly, because the job does not return its outcome. Without this assertion the reporting
-// half of Cut 6 could be flipped back to "fallback" and nothing here would notice.
-{
+  chk(h.length === 0, "no row claims the coaching, or a substitute, reached them", JSON.stringify(h.map(r => r.intent)));
   await reset();
   stubTwilio(true);
   const outcome = await sendWhatsApp(phone, "Lerato, haven't heard from you today — no stress.\n\n*Log one meal.*");
-  chk(outcome === "substituted",
-    "a send that degraded to the generic check-in reports `substituted`, not `fallback`",
-    String(outcome));
-  const h = await history();
-  chk(!!h[0] && h[0].intent === "PROACTIVE_SUBSTITUTED",
-    "…and the ledger agrees with the outcome", JSON.stringify(h.map(r => r.intent)));
+  chk(outcome === "dropped" && !templatesSent().includes(SID.reengage),
+    "a send outside the window with no template of its own reports `dropped`, and no generic template goes", `${outcome} | ${JSON.stringify(templatesSent())}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -253,6 +233,8 @@ REAL("\n4. A MESSAGE THAT HAS ITS OWN TEMPLATE IS UNAFFECTED — Cut 6 still wor
   const h = await history();
   chk(h.length === 1 && h[0].intent === "PROACTIVE",
     "it is recorded as a delivery, NOT a substitution", JSON.stringify(h.map(r => r.intent)));
+  chk(!!h[0] && /your KamLife plan for today is ready/.test(h[0].body),
+    "…and the stored body is the template the client READ, not the text it stood in for", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -266,17 +248,15 @@ REAL("\n5. NOTHING DOWNSTREAM TREATS A SUBSTITUTION AS COACHING DELIVERED");
   await runEveningAccountability();
   const { rows: loops } = await pool.query(
     "SELECT status FROM client_actions WHERE user_id = $1", [user.id]).catch(() => ({ rows: [] } as any));
-  chk(loops.length === 0, "a substituted evening opens no open loop", JSON.stringify(loops));
+  chk(loops.length === 0, "an evening that did not land opens no open loop", JSON.stringify(loops));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// The reader that asks "what was the last automated coach message?" filters on the delivery
-// intent, so marking a substitution changes what it can see. If it matched PROACTIVE alone, the
-// newest message the client received would be invisible and the model would be handed an OLDER
-// one as "something you said" — the client quotes the check-in back and the coach denies sending
-// it. The discriminator must not cost the snapshot its newest truth.
+// The reader that asks "what was the last automated coach message?" must name what the client
+// actually read. Today's evening did not reach them and nothing went in its place (#327), so the
+// newest message they read is still yesterday's plan, and no check-in they never saw is named.
 {
   await reset();
   // An ordinary proactive lands yesterday, inside the snapshot's two-day window…
@@ -284,7 +264,7 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
     `INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at)
      VALUES ($1, NULL, 'Morning Lerato — your plan for today is ready.', 'PROACTIVE', now() - interval '20 hours')`,
     [user.id]);
-  // …and today's evening send degrades to the generic check-in.
+  // …and today's evening send is rejected by the closed window.
   stubTwilio(true);
   await sendWhatsApp(phone, "Lerato, haven't heard from you today — no stress.\n\n*Log one meal.*");
   await new Promise(r => setTimeout(r, 2000));
@@ -292,10 +272,8 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
   const snapshot = await buildClientSnapshot({ ...user, id: user.id });
   const line = snapshot.split("\n").find(l => l.includes("Last automated coach message")) || "";
   chk(!!line, "the snapshot carries a last-automated-message line at all", JSON.stringify(snapshot.slice(0, 120)));
-  chk(isCheckIn(line), "…and it is the check-in the client READ, not the older plan",
-    JSON.stringify(line.slice(0, 140)));
-  chk(!/your plan for today is ready/i.test(line),
-    "…so the model is not handed a stale message as the newest one", JSON.stringify(line.slice(0, 140)));
+  chk(/your plan for today is ready/i.test(line) && !isCheckIn(line),
+    "…and it is the plan the client READ, never a check-in that did not go (#327)", JSON.stringify(line.slice(0, 140)));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -378,6 +356,57 @@ REAL("\n10. A PROMISE MADE BEFORE A PREGNANCY OR EATING-DISORDER DISCLOSURE IS N
   chk(!told.includes("commitment:"), "the reply path is not told to ask about it either", told.slice(0, 200));
   await pool.query("UPDATE users SET life_situation = NULL WHERE id = $1", [user.id]);
   await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+REAL("\n11. ON A COMMITMENT'S DUE DAY THE MORNING STANDS DOWN, SO THE CHECK-IN GOES OUT (#645)");
+// ════════════════════════════════════════════════════════════════════════
+// "I'll walk after work on Thursday". On Thursday the morning used the day's one slot and the evening's
+// "how did it go?" was capped away: the one thing we promised to follow up never went out.
+for (const quietDays of [0, 4]) { // and after a quiet spell since the promise (#652 attack): the silence ladder stands down too
+  await reset();
+  stubTwilio(false);
+  await pool.query("UPDATE users SET last_active_at = now() - make_interval(days => $2) WHERE id = $1", [user.id, quietDays]);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  const { runMorningCheckin } = await import("../server/scheduler/jobs/morning");
+  await runMorningCheckin();
+  _resetOutboundDedupe();
+  await runEveningAccountability();
+  const sent = [...freeformSent(), ...templatesSent()];
+  chk(sent.length === 1 && (/you planned .*walk after work.*how did it go/i.test(sent[0]) || sent[0] === SID.checkin),
+    `Thursday's one message is the check-in: the morning stood down (${quietDays} quiet days before it)`, JSON.stringify(sent));
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("UPDATE users SET last_active_at = now() WHERE id = $1", [user.id]);
+}
+
+// The morning stands down only when the evening will really send (Codex P1s on 6be9ebd). With no check-in
+// template, a window open at 06:00 but shut by 19:00 sends nothing in the evening; a sick client is skipped by
+// the evening. Either way the morning must still go, or that day they hear nothing.
+for (const why of ["window shuts before the evening", "sick and paused"] as const) {
+  await reset();
+  stubTwilio(false);
+  const today = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  const savedSid = process.env.TWILIO_CHECKIN_TEMPLATE_SID;
+  if (why === "window shuts before the evening") delete process.env.TWILIO_CHECKIN_TEMPLATE_SID;
+  await pool.query("DELETE FROM client_events WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_events (user_id, raw_text, received_at) VALUES ($1, 'ok', now() - interval '20 hours')", [user.id]);
+  if (why === "sick and paused") await pool.query("UPDATE users SET profile_notes = $2 WHERE id = $1", [user.id, `sick_since:${today} | sick_until:${today} | paused_until:${today}`]);
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("INSERT INTO client_facts (user_id, kind, subject, statement, detail, extracted_by) VALUES ($1, 'commitment', 'commitment', 'I will walk after work', $2, 'test')",
+    [user.id, JSON.stringify({ domain: "movement", what: "a walk after work", due: today, state: "open" })]);
+  const { runMorningCheckin } = await import("../server/scheduler/jobs/morning");
+  await runMorningCheckin();
+  const morning = mine().length;
+  _resetOutboundDedupe();
+  await runEveningAccountability();
+  chk(morning >= 1, `${why}: the evening can't send the check-in, so the morning does not stand down`, JSON.stringify(mine()));
+  if (savedSid !== undefined) process.env.TWILIO_CHECKIN_TEMPLATE_SID = savedSid;
+  await pool.query("DELETE FROM client_facts WHERE user_id = $1", [user.id]);
+  await pool.query("DELETE FROM client_events WHERE user_id = $1", [user.id]);
+  await pool.query("UPDATE users SET profile_notes = NULL WHERE id = $1", [user.id]);
 }
 
 await pool.query("DELETE FROM users WHERE phone_number = $1", [phone]);

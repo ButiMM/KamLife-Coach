@@ -19,7 +19,9 @@ import { readHeldConstraints } from "../../held-constraints";
 import { foodConstraints } from "../../food-swaps";
 import { deliveryAccepted } from "../../outbound-delivery";
 import { sendProactive, proactiveHold } from "../proactive-decision";
-import { getBehaviourPatternContext } from "../../core/client-record";
+import { getBehaviourPatternContext, activeCommitment, inWhatsAppWindow } from "../../core/client-record";
+import { withheldContext } from "../../life-context";
+import { CHECKIN_TEMPLATE, templateSid } from "../../whatsapp-templates";
 
 /**
  * WHAT WE SAY TO SOMEONE WHO HAS GONE — decided by the ladder, not written here.
@@ -169,6 +171,16 @@ export async function runMorningCheckin(): Promise<void> {
         console.error(`[TARGET_SANITY] bounds fix ${client.phoneNumber.slice(-4)}:`, JSON.stringify(fixes));
       }
     } catch (boundsErr) { console.error("[TARGET_SANITY] bounds check failed:", boundsErr); }
+    // A COMMITMENT DUE TODAY OWNS THE DAY'S ONE MESSAGE (#645): the morning used the slot and the evening's "how did
+    // it go?" was capped away. On its due day the morning stands down, if the evening can deliver the check-in,
+    // and ahead of the silence ladder: a promise made days ahead is often followed by a quiet spell (#652 attack).
+    // "Can deliver" is judged at the evening's hour, 13 hours on, and a paused client is skipped by the evening, so
+    // neither stands the morning down (Codex P1s on 6be9ebd): otherwise that day they hear nothing at all.
+    const due = await activeCommitment(client.id).catch(() => null);
+    if (due && !due.outcome && due.state === "open" && due.due === todaySAST() && !withheldContext(client.lifeSituation)
+      && pauseReason(client) === null
+      && (templateSid(CHECKIN_TEMPLATE) || await inWhatsAppWindow(client.id, Date.now() + 13 * 3_600_000))) continue;
+
     // ── SILENCE HAS ONE OWNER ────────────────────────────────────────────────────────────────
     //
     // (2026-08-19, Cut 6.) Deliberately ABOVE the night-shift skip below. That skip exists

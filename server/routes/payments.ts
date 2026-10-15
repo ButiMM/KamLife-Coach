@@ -429,28 +429,14 @@ export function registerPaymentRoutes(app: Express) {
           if (fromNum) {
             const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
             const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
-            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\nWeek 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\nWeek 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\nWeek 4–6: Visible changes start. This is where the work pays off.\nWeek 8–12: Real transformation. Clothes fit differently. Strength up.\n\nCoach K checks in every morning and evening. Log everything — meals, steps, workouts. The more you log, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nYour Day 1 workout is below. Do it today and reply *done* when finished.`;
+            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\nWeek 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\nWeek 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\nWeek 4–6: Visible changes start. This is where the work pays off.\nWeek 8–12: Real transformation. Clothes fit differently. Strength up.\n\nI check in once a day. Tell me what you eat, walk and train, in your own words; the more you tell me, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nWhen you're ready for Day 1, reply *workout* and I'll send today's session.`;
             // THROUGH THE OUTBOUND FLOOR (#608): a pregnant payer was sent "Goal: fat loss" and a Day 1 workout. When the floor
             // refuses the welcome, the client gets the plain payment confirmation and no programme.
             const { prepareOutbound } = await import("../outbound-authority");
             const welcome = await prepareOutbound("proactive", targetUser.id, normalisedPhone, welcomeMsg, targetUser);
             await notify(normalisedPhone, welcome.blocked ? `Payment confirmed, ${name}. Welcome to KamLife Coach.` : welcome.text);
-            if (!welcome.blocked) try {
-              const { buildDay1Workout } = await import("../programme");
-              const day1 = buildDay1Workout(targetUser);
-              if (day1) {
-                // The Day-1 workout now ships as several \n\n---\n\n bubbles and can exceed
-                // Twilio's 1600-char body cap as one message (rejected outright, error 21617 —
-                // the new client's first workout silently never arrived). Send each bubble.
-                for (const part of day1.split(/\n\n---\n\n/)) {
-                  const p = part.trim();
-                  const ready = p ? await prepareOutbound("proactive", targetUser.id, normalisedPhone, p, targetUser) : null;
-                  if (ready && !ready.blocked) await notify(normalisedPhone, ready.text);
-                }
-              }
-            } catch (e) {
-              console.error("[PAYFAST] Day 1 workout delivery error:", e);
-            }
+            // ONE MESSAGE (C2, CTO 12 Oct): the Day 1 workout went out as four or five more bubbles here, each one billed.
+            // It is one reply away ("workout"), in the same programme owner, when the client is ready for it.
           }
         }
       } else if (paymentStatus === "CANCELLED") {

@@ -162,6 +162,20 @@
       "when": 1790560800000,
       "tag": "0022_pattern_kind_drop_memories",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790647200000,
+      "tag": "0023_meal_created_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790733600000,
+      "tag": "0024_pending_confirms",
+      "breakpoints": true
     }
   ]
 }

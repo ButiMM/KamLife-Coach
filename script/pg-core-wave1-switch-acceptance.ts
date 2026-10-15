@@ -40,6 +40,10 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap and for supper I had chicken$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not samp\. For supper I had beef\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "samp", to: "rice" }, { type: "LOG_MEAL", foodText: "beef stew", meal: "dinner", needsConfirmation: false }]
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
+      : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
       : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
       : /ndisele i-red bull/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "a Red Bull", needsConfirmation: false }]
@@ -157,6 +161,89 @@ REAL("\n4d. A CORRECTION AND A NEW MEAL IN ONE MESSAGE (#624)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
+{
+  const T = "whatsapp:+27829438006";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Sleep Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const sl = await say(T, "I slept 5 hours last night");
+  const logged = (await pool.query("SELECT count(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'SLEEP_LOG'", [T])).rows[0].n;
+  chk(logged === 1 && /5/.test(sl) && !sl.includes(NEW), "\"I slept 5 hours last night\" is logged by the sleep owner (it feeds the weekly sleep trend) and answered with it", `${logged} | ${sl.slice(0, 160)}`);
+  const sleeps = async () => (await pool.query("SELECT count(*)::int n FROM chat_history c JOIN users u ON u.id = c.user_id WHERE u.phone_number = $1 AND c.intent = 'SLEEP_LOG'", [T])).rows[0].n as number;
+  const unsure = await say(T, "I slept maybe 5 hours last night");
+  chk(await sleeps() === 1, "an unsure reading (\"maybe\") writes no sleep record: the confidence gate holds (#643 review)", unsure.slice(0, 160));
+  const back = await say(T, "I slept 5 hours 2 days ago");
+  chk(await sleeps() === 1, "sleep from 2 days ago is not written as last night's: the sleep log has no date of its own (#643 review)", back.slice(0, 160));
+  const both = await say(T, "For supper I had chicken and I slept 5 hours last night");
+  const supper = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(supper === 1 && await sleeps() === 2, "supper and sleep in one message: both are written (#643 review)", `${supper} meal(s), ${await sleeps()} sleep(s) | ${both.slice(0, 160)}`);
+  const past = await say(T, "Had pap and wors for lunch yesterday and slept 5 hours last night");
+  const meals = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(meals === 2 && await sleeps() === 2, "yesterday's lunch with last night's sleep: the meal is written, only the sleep is dropped (#643 CTO attack)", `${meals} meal(s), ${await sleeps()} sleep(s) | ${past.slice(0, 160)}`);
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
+{
+  const T = "whatsapp:+27829438326";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Same Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and wors for lunch");
+  const asked = await say(T, "Should my dinner be the same as lunch?");
+  const afterAsk = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
+  chk(afterAsk === 1, "\"Should my dinner be the same as lunch?\" copies nothing: a question is not a report (#639 review)", `${afterAsk} rows | ${asked.slice(0, 120)}`);
+  process.env.APP_URL = "https://kamlife.example"; (await import("../server/card-policy"))._resetDumpWindow();
+  const same = await say(T, "dinner was the same as lunch"); delete process.env.APP_URL;
+  chk(/\[MEDIA:https:\/\/kamlife\.example\/card\//.test(same), "the copied dinner gets its card, like any meal (#639 review)", same.slice(0, 200));
+  const rows = (await pool.query("SELECT meal_label l, kcal_int k FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  const lunch = rows.find(r => r.l === "lunch"), dinner = rows.find(r => r.l === "dinner");
+  chk(rows.length === 2 && !!dinner && dinner.k === lunch?.k && !/items a bit clearer/i.test(same),
+    "\"dinner was the same as lunch\" logs dinner with lunch's calories, and never asks them to type the items", `${JSON.stringify(rows)} | ${same.slice(0, 120)}`);
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT (#637)");
+{
+  const T = "whatsapp:+27829438637";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Last Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const rows = async () => (await pool.query("SELECT meal_label l, raw_message r FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY m.created_at", [T])).rows;
+  process.env.CORE_WAVE2 = "on";
+  await say(T, "I had pap and wors for lunch");
+  await say(T, "I had chicken and rice for supper");
+  await say(T, "Lunch was a burger not pap"); // the correction rewrites lunch's row in place
+  const before = await rows();
+  await say(T, "Please remove my last meal");
+  const after = await rows();
+  chk(before.length === 2 && after.length === 1 && after[0].l === "lunch",
+    "supper, then a lunch correction, then \"remove my last meal\": supper goes and lunch stays", `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+  // MEALS WRITTEN BEFORE 0023 KEEP THEIR SEND ORDER (#650 attack): lunch sent first, then "at 9 I had eggs", backdated.
+  // The migration's own backfill runs on rows shaped like the legacy ones, inside a transaction that is rolled back.
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("ALTER TABLE meal_logs ALTER COLUMN created_at DROP NOT NULL");
+    const uid = (await c.query("SELECT id FROM users WHERE phone_number = $1", [T])).rows[0].id, run = `SM650${Date.now()}`;
+    for (const [n, label, ate, sent] of [[1, "lunch", "12:00", "12:05"], [2, "breakfast", "09:00", "12:10"]] as const) {
+      const day = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+      await c.query("INSERT INTO client_events (user_id, source_message_id, received_at, raw_text) VALUES ($1, $2, $3, $4)", [uid, `${run}${n}`, `${day}T${sent}:00+02:00`, label]);
+      await c.query("INSERT INTO meal_logs (user_id, source, meal_label, kcal_int, logged_at, source_message_id, created_at) VALUES ($1, 'text', $2, 300, $3, $4, NULL)",
+        [uid, label, new Date(`${day}T${ate}:00+02:00`), `${run}${n}#log ${label}`]);
+    }
+    const { readFileSync } = await import("node:fs");
+    await c.query(readFileSync("migrations/0023_meal_created_at.sql", "utf-8").split("--> statement-breakpoint").find(q => /UPDATE/.test(q))!);
+    const last = (await c.query("SELECT meal_label FROM meal_logs WHERE user_id = $1 AND source_message_id LIKE $2 ORDER BY created_at DESC LIMIT 1", [uid, `${run}%`])).rows[0]?.meal_label;
+    chk(last === "breakfast", "a meal logged before the migration keeps its send order: the backdated breakfast, sent last, is last (#650 attack)", String(last));
+  } finally { await c.query("ROLLBACK"); c.release(); }
+  delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";
@@ -255,7 +342,12 @@ REAL("\n4g. #586 — A MEAL THE OLD KEYWORDS MISS IS WRITTEN FOR AN ORDINARY CLI
   chk(m2.length === 2 && m2.some(r => /kota/i.test(r)) && m2.some(r => /pap/i.test(r)) && k1.includes(NEW) && k2.includes(NEW), "\"Kota from the spaza\" and \"Ndidle ipapa nenyama\" each write a meal, and the new coach answers after the write", `${JSON.stringify(m2)} | ${k1.slice(0, 120)} | ${k2.slice(0, 120)}`);
   const ks = await say(K, "Ndihambe 6200 steps namhlanje"), st = (await pool.query("SELECT MAX(s.steps)::int n FROM step_logs s JOIN users u ON u.id = s.user_id WHERE u.phone_number = $1", [K])).rows[0].n;
   chk(st === 6200 && ks.includes(NEW), "isiXhosa steps are written by the step tool", `${st} | ${ks.slice(0, 120)}`);
-  const kv = await say(K, "Some rice from mama's pot"), held = (await meals()).length, ky = await say(K, "yes"), after = (await meals()).length;
+  const kv = await say(K, "Some rice from mama's pot"), held = (await meals()).length;
+  // STORED, NOT IN THE PROCESS (#322): the offer is a row, so a "yes" sent across a redeploy still finds it.
+  const parked = (await pool.query("SELECT action->>'foodText' f FROM pending_confirms p JOIN users u ON u.id = p.user_id WHERE u.phone_number = $1", [K])).rows[0]?.f;
+  chk(parked === "some rice", "the offer waiting for \"yes\" is stored, so it survives a redeploy (#322)", String(parked));
+  const ky = await say(K, "yes"), after = (await meals()).length;
+  chk(Number((await pool.query("SELECT COUNT(*)::int n FROM pending_confirms p JOIN users u ON u.id = p.user_id WHERE u.phone_number = $1", [K])).rows[0].n) === 0, "…and taking it removes it: a second \"yes\" never double-fires");
   chk(/reply \*yes\*/i.test(kv) && held === 2 && after === 3 && ky.trim().length > 0, "a vague amount asks first; the client's \"yes\" writes it (the cohort gate is gone)", `${held} → ${after} | ${kv.slice(0, 120)} | ${ky.slice(0, 120)}`);
   const before = (await meals()).length, rb = await say(K, "Ndisele i-Red Bull"), withRb = await meals();
   chk(withRb.length === before + 1 && withRb.some(r => /red bull/i.test(r)) && rb.includes(NEW), "a drink read as a meal is written (the writer is handed \"I had …\", #593)", `${before} → ${withRb.length} | ${rb.slice(0, 120)}`);

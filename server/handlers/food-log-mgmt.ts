@@ -614,13 +614,13 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     // Cutoff spans midnight: a meal logged 23:50 must still be removable at 00:10 —
     // "today only" made the coach refuse the undo right after the day rolled over.
     // During the day this is identical to sastDayStart(). Before 05:00 a meal is filed on the day that ended (#582), so
-    // the window starts there, and "last" is the last WRITTEN (xmin), not the latest filed time: at 01:20 "remove my
-    // last meal" found nothing, because the 01:15 plate sat 24 hours back.
+    // the window starts there, and "last" is the last one SENT (created_at), not the latest filed time: at 01:20 "remove my
+    // last meal" found nothing, because the 01:15 plate sat 24 hours back. Not xmin: a correction rewrites its row (#637).
     const todayStart = new Date(Math.min(mealDayStart().getTime(), Date.now() - 2 * 3_600_000));
     const lastMealLog = await db.select({ id: mealLogs.id })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
-      .orderBy(desc(sql`${mealLogs}.xmin::text::bigint`))
+      .orderBy(desc(mealLogs.createdAt))
       .limit(1);
 
     const dropLast: string[] = [];

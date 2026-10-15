@@ -211,7 +211,9 @@ export type CoachAction =
   // A training session they DID (not planned, not missed). `what` in their words; `retro` a past day.
   | { type: "LOG_WORKOUT"; what?: string; retro?: string }
   // They want a different goal. Only the goals the product stores; lifecycle.ts confirms first.
-  | { type: "SET_GOAL"; goal: "fat_loss" | "muscle_gain" | "recomposition" };
+  | { type: "SET_GOAL"; goal: "fat_loss" | "muscle_gain" | "recomposition" }
+  // Sleep they report ("slept 5 hours", "bad night"). No number here: the sleep log reads the hours from their words.
+  | { type: "LOG_SLEEP" };
 
 export type CoachActionType = CoachAction["type"];
 
@@ -428,6 +430,7 @@ export function validateAction(raw: any): CoachAction {
       const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
       return { type: "LOG_WORKOUT", what, retro };
     }
+    case "LOG_SLEEP": return { type: "LOG_SLEEP" };
     case "SET_GOAL": {
       const goal = String(a.goal ?? "").toLowerCase().trim();
       return goal === "fat_loss" || goal === "muscle_gain" || goal === "recomposition" ? { type: "SET_GOAL", goal } : { type: "JUST_REPLY" };
@@ -494,7 +497,7 @@ export const CONFIDENCE_TO_EXECUTE = 0.75;
 const WRITES_STATE = new Set<CoachActionType>([
   "LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL", "SET_SICK", "END_SICK",
   "SET_REMINDER", // creates a row; idempotency stops a retry from double-scheduling the ping
-  "CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL",
+  "CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL", "LOG_SLEEP",
 ]);
 
 /** True if performing this action changes stored state (a wrong auto-run would corrupt). */
@@ -646,6 +649,7 @@ export function describeAction(action: CoachAction): string {
     case "END_SICK": return "end sick / resume";
     case "SET_REMINDER": return `remind to "${action.body}"${action.when ? ` (${action.when})` : ""}`;
     case "CORRECT_MEAL": return `correct ${action.meal || "the meal"}${action.retro ? ` (${action.retro})` : ""}: "${action.from}" → "${action.to}"`;
+    case "LOG_SLEEP": return "log sleep";
     case "LOG_WORKOUT": return `log a session done${action.what ? `: ${action.what}` : ""}${action.retro ? ` (${action.retro})` : ""}`;
     case "SET_GOAL": return `change goal to ${action.goal}`;
   }

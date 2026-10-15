@@ -41,9 +41,7 @@ export async function getDayLedger(userId: string, opts?: { forDate?: Date; user
   const dayEnd = new Date(dayStart.getTime() + 86_400_000);
   // Before 05:00 a meal is filed on the day that just ended, so "today's food" is that day's (#582: at 03:41 the
   // coach was told "nothing logged yet" right after a meal). Steps and water stay on the calendar day they're stored on.
-  // …and runs until now: a meal they tied to today at 00:40 ("this morning I had eggs") is filed on the new date, and was
-  // left out, so the client heard "I can't line up today's numbers" (journey-lab 1 at real night).
-  const mealStart = opts?.forDate ? dayStart : mealDayStart(), mealEnd = new Date(Math.max(mealStart.getTime() + 86_400_000, opts?.forDate ? 0 : Date.now() + 60_000));
+  const mealStart = opts?.forDate ? dayStart : mealDayStart(), mealEnd = new Date(mealStart.getTime() + 86_400_000);
   const rows = await db.select({
     label: mealLogs.mealLabel, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt,
     carbs: mealLogs.carbsInt, fat: mealLogs.fatInt, loggedAt: mealLogs.loggedAt,
