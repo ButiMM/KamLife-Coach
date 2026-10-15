@@ -180,6 +180,9 @@ async function main() {
   ];
   const weeklyReplies: Array<readonly [string, string]> = [];
   for (const door of WEEKLY_DOORS) weeklyReplies.push([door, await say(door)] as const);
+  // The weigh ask rides only the first reply that carries it (#297), so the comparison is with
+  // "this week" asked AFTER the doors, under the same ask state; identity of the card still holds.
+  const weekAfter = await say("this week");
 
   for (const [door, reply] of weeklyReplies) {
     check(`"${door}" reaches the one weekly owner`, () => {
@@ -187,10 +190,11 @@ async function main() {
       assert.ok(!/something went wrong on my side|give me a second and try again/i.test(reply),
         `the pipeline crashed and returned its fallback:\n      ${reply.slice(0, 120)}`);
       assert.ok(!WITHHELD.test(reply), `the verifier destroyed a progress answer:\n      ${reply.slice(0, 160)}`);
-      assert.equal(reply, week,
+      assert.ok(!/\*\*\s*$/.test(reply), `the card ends in an empty "**" line:\n      ${reply.slice(-80)}`);
+      assert.equal(reply, weekAfter,
         `"${door}" and "this week" describe the same seven days with different text — that is a\n`
         + `      second weekly authority, which is the defect this domain was converged to remove.\n`
-        + `      "${door}": ${reply.slice(0, 160)}\n      "this week": ${week.slice(0, 160)}`);
+        + `      "${door}": ${reply.slice(0, 160)}\n      "this week": ${weekAfter.slice(0, 160)}`);
     });
   }
 
