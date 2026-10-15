@@ -329,6 +329,14 @@ chk(/\+?27820000974/.test(c3.founder) && admitsNotConfirmed(c3.founder),
     "an unconfirmed cancel is a founder task, listed every morning with its age (#572)", JSON.stringify(inbox));
   await pool.query("UPDATE escalations SET status = 'resolved', resolved_at = now() WHERE id = $1", [task?.id ?? 0]);
   chk(!/PayFast did NOT confirm/.test((await founderMorningInbox()) || ""), "…until it is resolved in the dashboard");
+  // D12: retention at 14 days. Two joined 16 days ago; one wrote yesterday, one went quiet 10 days ago.
+  await pool.query("DELETE FROM users WHERE phone_number IN ('whatsapp:+27820000981', 'whatsapp:+27820000982')");
+  await pool.query(`INSERT INTO users (phone_number, name, onboarding_state, created_at, last_active_at) VALUES
+    ('whatsapp:+27820000981', 'Kept', 'COMPLETE', now() - interval '16 days', now() - interval '1 day'),
+    ('whatsapp:+27820000982', 'Quiet', 'COMPLETE', now() - interval '16 days', now() - interval '10 days')`);
+  const kept = await founderMorningInbox();
+  chk(/day 14, 1 of 2/.test(kept || ""), "the 07:00 inbox says how many of the day-14 cohort are still writing (D12)", JSON.stringify(kept));
+  await pool.query("DELETE FROM users WHERE phone_number IN ('whatsapp:+27820000981', 'whatsapp:+27820000982')");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
