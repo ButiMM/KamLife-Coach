@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # CTO Audit — Live Status Tracker
 
 > **Why this file exists:** The original 50-point CTO audit lived only in a chat

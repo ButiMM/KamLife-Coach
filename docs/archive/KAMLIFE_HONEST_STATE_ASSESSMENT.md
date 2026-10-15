@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — Honest State Assessment
 
 *Prepared for independent third-party review. Written to be read by someone who has

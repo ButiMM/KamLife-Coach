@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # CTO Deep-Dive — What Testers Actually Do vs What the System Does
 
 **Date:** 2026-07-16 · **Method:** every tester behaviour observed across this
