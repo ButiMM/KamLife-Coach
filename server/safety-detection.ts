@@ -35,12 +35,14 @@ export async function founderMorningInbox(now = new Date()): Promise<string | nu
   const money = await db.select({ at: escalations.createdAt, text: escalations.triggerMessage })
     .from(escalations).where(and(eq(escalations.reason, "billing"), inArray(escalations.status, ["open", "claimed"])))
     .orderBy(asc(escalations.createdAt)).limit(10);
-  // RETENTION AT 14 AND 30 DAYS (D12): of the clients who joined in that week, how many wrote in the last 7 days.
+  // RETENTION AT 14 AND 30 DAYS (D12): of the clients who joined in that week, how many wrote in their own
+  // last week before day 14 / day 30, or later. Measured from each client's signup, not from today (Codex @ c448d26).
   const DAY = 86_400_000;
   const kept = async (days: number) => {
-    const rows = await db.select({ last: users.lastActiveAt }).from(users).where(and(eq(users.onboardingState, "COMPLETE"),
+    const rows = await db.select({ joined: users.createdAt, last: users.lastActiveAt }).from(users).where(and(eq(users.onboardingState, "COMPLETE"),
       gte(users.createdAt, new Date(now.getTime() - (days + 7) * DAY)), lt(users.createdAt, new Date(now.getTime() - days * DAY))));
-    return { n: rows.length, kept: rows.filter(r => r.last && now.getTime() - new Date(r.last).getTime() < 7 * DAY).length };
+    return { n: rows.length, kept: rows.filter(r => r.joined && r.last
+      && new Date(r.last).getTime() >= new Date(r.joined).getTime() + (days - 7) * DAY).length };
   };
   const [d14, d30] = await Promise.all([kept(14), kept(30)]);
   if (!overdue.length && !money.length && !d14.n && !d30.n) return null;
