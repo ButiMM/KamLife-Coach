@@ -372,7 +372,6 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
 // with NORMALIZER=off, so the rewriter never executed in any test that proved Cut 1 worked.
 
 
-
 test("cut 2: rewriting a mixed note down to one fact is what breaks the ledger", async () => {
   const { parseMessyIntake } = await import("../server/understanding/messy-intake");
   const raw = parseMessyIntake("Yesterday I walked eight thousand steps and I had chicken and pap. I'm exhausted.");
@@ -646,10 +645,6 @@ test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", 
   const { parseDropLoggedItem } = FOODID;
   assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
 });
-
-
-
-
 
 
 // ============================================================
@@ -1903,8 +1898,6 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
 });
 
 
-
-
 // MEAL-REPEAT META-COMPLAINT GUARD (2026-07-10) — a voice complaint "I already told
 // you what's the plan for lunch. Have you forgotten? We are repeating the same things"
 // matched repeat+lunch and LOGGED YESTERDAY'S PASTA. Complaints must never log food.
@@ -2125,7 +2118,6 @@ test("media: sticker (image/webp, no caption) → sticker detection message, no 
 });
 
 // ============================================================
-
 
 
 // ============================================================
@@ -3562,6 +3554,24 @@ test("event boundaries: PRE-positioned phrasing is still unhandled — documente
 // 15-kcal entry — then reached into the 7-day history and told them they had eaten a previous
 // day's breakfast. The invented meal was not invented: it was misattributed from their own past.
 
+test("client truth: a pre-workout SNACK is not the pre-workout supplement", async () => {
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const names = (m: string) => scanForSAFoods(m).map(f => f.name);
+  assert.deepEqual(names("I had a pre-workout snack"), [],
+    "a snack before training must not log a scoop of powder");
+  assert.ok(!names("pre-workout snack: banana and peanut butter").some(n => /pre.?workout/i.test(n)),
+    "and the REAL food must be what gets logged");
+  assert.deepEqual(names("pre-workout snack: banana and peanut butter").sort(), ["Banana", "Peanut butter"]);
+  assert.deepEqual(names("I had a snack before the gym"), [], "the same claim, worded the other way round");
+});
+
+test("client truth: a bare pre-workout mention IS still the supplement", async () => {
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  // The fix must not delete a real capability: someone who actually took C4 still gets it.
+  for (const m of ["I had my pre-workout", "took my pre workout and trained"]) {
+    assert.ok(scanForSAFoods(m).some(f => /pre.?workout/i.test(f.name)), `"${m}" is the powder`);
+  }
+});
 
 
 // ── PORTION UNITS: "2 spoons of pap" is not two plates of pap ────────────────────────────────
@@ -3605,6 +3615,30 @@ test("portion units: the FOOD decides — a handful of peanuts is one portion of
     "but a handful of pap is genuinely a fraction of a plate");
 });
 
+test("portion units: END TO END — the hard South African cases", async () => {
+  const { adjustFoodsForSegment } = await import("../server/portion-memory");
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const kcal = (msg: string) => {
+    const foods = scanForSAFoods(msg);
+    return adjustFoodsForSegment(foods as any, msg).reduce((s: number, f: any) => s + f.adjustedCalories, 0);
+  };
+  const spoons = kcal("2 spoons of pap");
+  assert.ok(spoons > 0 && spoons < 200, `2 spoons of pap must be a small number, got ${spoons}`);
+  assert.ok(kcal("2 plates of pap") > 500, "but two PLATES is still two plates");
+  assert.ok(kcal("3 stashes of bread") < 250, "an unknown unit must not triple the bread");
+  const handful = kcal("a handful of peanuts");
+  assert.ok(handful > 120 && handful < 250, `a handful of peanuts is ~176 kcal, got ${handful}`);
+  assert.equal(kcal("2 tablespoons peanut butter"), 176, "a real measurement is unchanged");
+});
+
+test("portion units: an estimated quantity is tagged ai even when the FOOD is db", async () => {
+  const { adjustFoodsForSegment } = await import("../server/portion-memory");
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const of = (msg: string) => adjustFoodsForSegment(scanForSAFoods(msg) as any, msg)[0] as any;
+  assert.equal(of("2 spoons of pap").origin, "ai", "identity verified, quantity guessed");
+  assert.equal(of("3 stashes of bread").origin, "ai", "an unknown unit is an estimate too");
+  assert.equal(of("2 plates of pap").origin, undefined, "a stated full portion is not an estimate");
+});
 
 
 // ── FOOD PROVENANCE: where a calorie came from ──────────────────────────────────────────────
