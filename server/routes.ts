@@ -886,7 +886,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
 // bumpVoiceFailure + clearVoiceFailure moved to handlers/media.ts
 
-async function checkRateLimit(phone: string): Promise<boolean> {
+export async function checkRateLimit(phone: string): Promise<boolean> {
   try {
     const result = await pool.query<{ hit_count: number }>(`
       INSERT INTO rate_limits (phone, window_start, hit_count)
