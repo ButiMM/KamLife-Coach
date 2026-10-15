@@ -222,12 +222,17 @@ REAL("\n3. THE WEIGH-IN ASK IS RECORDED WHEN SENT AND CANNOT REPEAT DAILY");
   await pool.query("DELETE FROM sent_proactive WHERE user_id = $1 AND message_key = 'weigh_ask'", [u.id]);
   const { oneActionCommand } = await import("../server/handlers/one-action-command");
   const { closeWeighAsk } = await import("../server/scheduler/shared");
-  const said = await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true, asksAboutToday: true });
-  if (/scale|weigh/i.test(said)) {
+  // Not asksAboutToday: after midday that question's answer is never the weigh-in (Gate 3), so the case
+  // would only run in the morning. "weigh" alone also matched "weight" in the protein line.
+  const said = await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true });
+  if (/scale/i.test(said)) {
     chk(await asks() === 0, "a reactive weigh-in ask is not recorded when it is decided (#297)", String(await asks()));
+    const { readWeighAskAndPresence } = await import("../server/scheduler/shared");
+    const inFlight = (await readWeighAskAndPresence(u.id)).daysSinceWeighAsk;
+    chk(inFlight === 0, "…but a second turn while it is still being delivered reads it as asked today (Codex @ b3d1035)", String(inFlight));
     await closeWeighAsk(u.phoneNumber, false);
     chk(await asks() === 0, "…nor when its reply is not delivered", String(await asks()));
-    await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true, asksAboutToday: true });
+    await oneActionCommand(await fresh(u.phoneNumber), { atKeyboard: true });
     await closeWeighAsk(u.phoneNumber, true);
     chk(await asks() === 1, "…and is recorded once the reply is delivered", String(await asks()));
   } else chk(false, "the reactive one-action answer for a never-weighed client is the weigh-in", said.slice(0, 120));

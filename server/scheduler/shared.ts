@@ -291,12 +291,22 @@ export async function recordWeighAsk(userId: string): Promise<void> {
 }
 
 /** A REACTIVE ASK RIDES ITS REPLY (#297): turn → client, recorded only once that reply's delivery is accepted. */
-const weighAskRiding = new Map<string, string>();
-export function weighAskRides(turnKey: string, userId: string): void { weighAskRiding.set(turnKey, userId); }
+const weighAskRiding = new Map<string, { userId: string; at: number }>();
+export function weighAskRides(turnKey: string, userId: string): void { weighAskRiding.set(turnKey, { userId, at: Date.now() }); }
 export async function closeWeighAsk(turnKey: string, accepted: boolean): Promise<void> {
-  const id = weighAskRiding.get(turnKey);
+  const id = weighAskRiding.get(turnKey)?.userId;
   weighAskRiding.delete(turnKey);
   if (id && accepted) await recordWeighAsk(id);
+}
+/** An ask still on its way counts as asked, so a second turn before delivery doesn't ask again (Codex @ b3d1035).
+ *  Bounded to 10 minutes so a turn that never reached the send boundary can't hold the ask back for long. */
+function weighAskInFlight(userId: string): boolean {
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const [k, v] of weighAskRiding) {
+    if (v.at < cutoff) weighAskRiding.delete(k);
+    else if (v.userId === userId) return true;
+  }
+  return false;
 }
 
 /** When we last asked them to weigh, and whether they have written to us today (SAST). */
@@ -314,7 +324,7 @@ export async function readWeighAskAndPresence(userId: string): Promise<{ daysSin
       .limit(1).catch(() => [] as any[]),
   ]);
   return {
-    daysSinceWeighAsk: ask[0]?.at ? sastDaysBetween(new Date(ask[0].at)) : null,
+    daysSinceWeighAsk: weighAskInFlight(userId) ? 0 : ask[0]?.at ? sastDaysBetween(new Date(ask[0].at)) : null,
     presentToday: inbound.length > 0,
   };
 }
