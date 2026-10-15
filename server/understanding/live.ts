@@ -347,7 +347,7 @@ export async function resumeEngineConfirm(ctx: {
   const { user } = ctx;
   if (user?.awaitingInputType !== "engine_confirm") return null;
   const verdict = classifyConfirmReply(ctx.message);
-  const pending: CoachAction | null = takePendingConfirm(user.id); // consume the parked offer
+  const pending: CoachAction | null = await takePendingConfirm(user.id); // consume the parked offer
   // The confirm turn is over either way — clear the flag so we can never get stuck awaiting.
   await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, user.id)).catch(() => {});
   user.awaitingInputType = null;
@@ -669,7 +669,7 @@ export async function runMeaningEngineLive(ctx: {
         // "yes" has somewhere to land. resumeEngineConfirm (called early in the pipeline)
         // picks it up. Without this the "yes" looped forever (2026-07-23 live disaster).
         if (!runDry && firstConfirm) {
-          setPendingConfirm(user.id, firstConfirm.action);
+          await setPendingConfirm(user.id, firstConfirm.action);
           await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
         }
         // ONE REPLY (Slice 2). The engine's own sentence answers everything the client said;

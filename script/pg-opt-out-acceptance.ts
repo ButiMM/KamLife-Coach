@@ -211,11 +211,11 @@ REAL("\n3. THE DASHBOARD AND ADMIN DOORS — broadcast, intervention, admin mess
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n3b. A SUBSTITUTE IS NOT THE MESSAGE — the admin door outside the 24-hour window (Codex @ bbffa67)");
+REAL("\n3b. OUTSIDE THE 24-HOUR WINDOW THE ADMIN MESSAGE IS NOT REPORTED AS SENT (Codex @ bbffa67, #327)");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 {
-  // Freeform is refused with 63016 and the generic re-engagement template goes instead. The founder
-  // typed a message the client never received: it must not be reported, or logged, as sent.
+  // Freeform is refused with 63016, and nothing goes in its place (#327). The founder typed a message
+  // the client never received: it must not be reported, or logged, as sent.
   const shadowWas = process.env.SHADOW;
   process.env.SHADOW = "";   // the shadow door intercepts before the 63016 path graded here
   process.env.TWILIO_REENGAGE_TEMPLATE_SID = "HX0000000000000000000000000000000d";
@@ -229,8 +229,8 @@ REAL("\n3b. A SUBSTITUTE IS NOT THE MESSAGE — the admin door outside the 24-ho
   process.env.SHADOW = shadowWas;
   await new Promise(r => setTimeout(r, 1000));
   const logged = await pool.query("SELECT COUNT(*)::int n FROM chat_history WHERE user_id = $1 AND message_out = $2", [ORDINARY.id, text]);
-  chk(res?.success !== true && /not delivered/i.test(String(res?.message || "")),
-    "the founder is told the message was NOT delivered when only the generic template went", JSON.stringify(res));
+  chk(res?.success !== true && /not (delivered|sent)/i.test(String(res?.message || "")) && /24-hour window/i.test(String(res?.message || "")),
+    "the founder is told the message was NOT sent, and that the window may be why", JSON.stringify(res));
   chk(logged.rows[0].n === 0, "…and the undelivered text is not logged as said to the client", `rows=${logged.rows[0].n}`);
 }
 

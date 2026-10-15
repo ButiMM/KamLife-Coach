@@ -657,6 +657,11 @@ const NOT_CLIENT_FACING: Array<[string, string]> = [
  */
 const NOT_CLIENT_FACING_RETURNS: Array<[string, RegExp, string]> = [
   [
+    "server/safety-detection.ts",
+    /^\s*return `\$\{parts\.join\("\\n\\n"\)\}\\n\\nOpen your dashboard inbox/,
+    "founderMorningInbox is the founder's 07:00 ops inbox (#572), sent only to the ops number; it moved here from scheduler.ts, where the same text was never a return",
+  ],
+  [
     "server/core/client-record.ts",
     /^\s*return "WHAT THIS CLIENT HAS TOLD YOU/,
     "factsForCoach renders the fact store into the meaning engine's system prompt; the model reads it, the client never does",
