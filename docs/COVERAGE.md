@@ -12,7 +12,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 
 **What moved since 12 Oct** (all merged 12–13 Oct; nothing merged 14 Oct, the pause): #631 #625 #627 #622 #635 #642 #644 #626 #649 #641 #648 #640 #628 #650 #651 #652 #653 #639 #656 #657 #658 #660 #661 #662 #663 #664 #643. `main` is `eca0220`.
 
-**CI note (15 Oct):** `npm test` on `main` is 39/39 green. `main` has no push CI, so the database suite (`pg-acceptance`) only shows on PRs, and every open PR was red on the same shards. Reproduced on `main` (`eca0220`): one cause, three reds (`long-voice-tail`, `long-voice-reverts`, `long-turn-reverts`). On a Thursday, a workout correction naming "Thursday" also wrote a session on last Thursday, because two day resolvers disagree about today's own weekday name. The fix is PR #670. Every other `main` shard is green locally (`photo-door` needs DNS, so it's green in CI only).
+**CI note (15 Oct):** `npm test` on `main` is 39/39 green. `main` has no push CI, so the database suite (`pg-acceptance`) only shows on PRs, and every open PR was red on the same shards. Reproduced on `main` (`eca0220`): one cause, three reds (`long-voice-tail`, `long-voice-reverts`, `long-turn-reverts`). On a Thursday, a workout correction naming "Thursday" also wrote a session on last Thursday, because two day resolvers disagree about today's own weekday name. The fix is PR #672 (#670 closed as its duplicate; its test was ported onto #672). Every other `main` shard is green locally (`photo-door` needs DNS, so it's green in CI only).
 
 ### A. What the client sends
 | Row | What testers need | Status | What's left | Where | Week |
@@ -24,7 +24,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **A5** | Steps, distance screenshot | Built (steps proven in trace) | Screenshot path not proven | — | B |
 | **A6** | Water, sleep | Built: water; sleep through the coach (#643, meal plus sleep in one message both written) | Trace 15 Oct: "I slept 5 hours" gets the old sleep line, and the turn's record shows no write, so the write is unproven | — | B |
 | **A7** | Weigh-in; progress photos | Weigh-in built (#594, #620) | Progress photos have no action | — | B |
-| **A8** | Workout done, show today's workout | Built (#618, #623); a correction naming today wrote a second session a week back (PR #670) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record) | #568 | C, L |
+| **A8** | Workout done, show today's workout | Built (#618, #623); a correction naming today wrote a second session a week back (PR #672) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record) | #568 | C, L |
 | **A9** | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
 | **A10** | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach: PR #655 (batch 1), then batch 2 | #568 | C |
 | **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7); Codex talk journey 15 Oct | — | I |
@@ -82,7 +82,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **D11** | CI can't spend production's AI budget | Built | — | — | — |
 | **D12** | **Retention**: still here at 14 and 30 days | **Open: not measured anywhere** | One number in the 07:00 report | #423 | F |
 | — | Pending answers survive a redeploy | Built (#661) | — | #322 | C |
-| — | Tests fail after midnight or on one weekday | Open: §4f and "step report is acknowledged" depend on the clock (#391); the Thursday red is fixed by PR #670 | Pin the test clock | #404 #670 | A |
+| — | Tests fail after midnight or on one weekday | Open: §4f and "step report is acknowledged" depend on the clock (#391); the Thursday red is fixed by PR #672 | Pin the test clock | #404 #672 | A |
 | — | Each piece of advice linked to what happened next | Open | — | #369 | K |
 
 ### Business and founder
