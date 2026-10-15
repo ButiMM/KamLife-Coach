@@ -29,13 +29,23 @@ export function escalationSLA(priority: string): Date {
  * null = nothing to say.
  */
 export async function founderMorningInbox(now = new Date()): Promise<string | null> {
-  const [{ db }, { escalations }, { and, eq, lte, inArray, asc, sql }] = await Promise.all([import("./db"), import("../shared/schema"), import("drizzle-orm")]);
+  const [{ db }, { escalations, users }, { and, eq, lte, gte, lt, inArray, asc, sql }] = await Promise.all([import("./db"), import("../shared/schema"), import("drizzle-orm")]);
   const overdue = await db.select({ userId: escalations.userId, reason: escalations.reason, priority: escalations.priority })
     .from(escalations).where(and(eq(escalations.status, "open"), lte(escalations.slaDeadline, now))).limit(20);
   const money = await db.select({ at: escalations.createdAt, text: escalations.triggerMessage })
     .from(escalations).where(and(eq(escalations.reason, "billing"), inArray(escalations.status, ["open", "claimed"])))
     .orderBy(sql`(${escalations.priority} = 'urgent') DESC`, asc(escalations.createdAt)).limit(10); // urgent first, never pushed off the list (#678)
-  if (!overdue.length && !money.length) return null;
+  // RETENTION AT 14 AND 30 DAYS (D12): of the clients who joined in that week, how many wrote in their own
+  // last week before day 14 / day 30, or later. Measured from each client's signup, not from today (Codex @ c448d26).
+  const DAY = 86_400_000;
+  const kept = async (days: number) => {
+    const rows = await db.select({ joined: users.createdAt, last: users.lastActiveAt }).from(users).where(and(eq(users.onboardingState, "COMPLETE"),
+      gte(users.createdAt, new Date(now.getTime() - (days + 7) * DAY)), lt(users.createdAt, new Date(now.getTime() - days * DAY))));
+    return { n: rows.length, kept: rows.filter(r => r.joined && r.last
+      && new Date(r.last).getTime() >= new Date(r.joined).getTime() + (days - 7) * DAY).length };
+  };
+  const [d14, d30] = await Promise.all([kept(14), kept(30)]);
+  if (!overdue.length && !money.length && !d14.n && !d30.n) return null;
   const parts: string[] = [];
   if (overdue.length) {
     const urgent = overdue.filter(e => e.priority === "urgent"), high = overdue.filter(e => e.priority === "high").length;
@@ -47,6 +57,7 @@ export async function founderMorningInbox(now = new Date()): Promise<string | nu
     const days = (at: Date | null) => at ? Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 86_400_000)) : 0;
     parts.push(`💸 Money tasks open: ${money.length} (listed every morning until resolved)\n${money.map(t => `• ${days(t.at)}d — ${String(t.text || "billing task").slice(0, 400)}`).join("\n")}`);
   }
+  if (d14.n || d30.n) parts.push(`📈 Still writing this week: day 14, ${d14.kept} of ${d14.n}; day 30, ${d30.kept} of ${d30.n} (of the clients who joined that week)`);
   return `${parts.join("\n\n")}\n\nOpen your dashboard inbox when you're up.`;
 }
 

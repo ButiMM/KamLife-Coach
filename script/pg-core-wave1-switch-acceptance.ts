@@ -42,6 +42,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^Slept badly last night, taking a break from the gym today$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^My knee is better and I slept 7 hours last night$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
@@ -59,7 +61,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^change my goal to muscle gain$/i.test(msg) ? [{ type: "SET_GOAL", goal: "muscle_gain" }] : null;
     const fix = log586 ? log586 : front ? front : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
     content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /^I don't eat fish$/i.test(msg) ? [{ kind: "preference", subject: "no fish", statement: "I don't eat fish", detail: {} }] : /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
-  } else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
+  } else if (body.includes("this is your scheduled onboarding message")) { content = "Take a 20-minute walk today. How did yesterday go?"; (globalThis as any).__lastCompose = body; }
+  else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
   return new Response(JSON.stringify({ id: "stub", object: "chat.completion", created: 1, model: "stub",
@@ -181,6 +184,14 @@ REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
   const past = await say(T, "Had pap and wors for lunch yesterday and slept 5 hours last night");
   const meals = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
   chk(meals === 2 && await sleeps() === 2, "yesterday's lunch with last night's sleep: the meal is written, only the sleep is dropped (#643 CTO attack)", `${meals} meal(s), ${await sleeps()} sleep(s) | ${past.slice(0, 160)}`);
+  const tired = await say(T, "Slept badly last night, taking a break from the gym today");
+  const notes = (await pool.query("SELECT profile_notes FROM users WHERE phone_number = $1", [T])).rows[0]?.profile_notes || "";
+  chk(!/paused_until:/.test(notes) && !/No check-in messages/i.test(tired), "a sleep report never pauses check-ins: one gym break is not a week off (#676)", `${notes} | ${tired.slice(0, 160)}`);
+  await pool.query("UPDATE users SET injuries = 'knee pain' WHERE phone_number = $1", [T]);
+  const before = await sleeps();
+  const knee = await say(T, "My knee is better and I slept 7 hours last night");
+  const inj = (await pool.query("SELECT injuries FROM users WHERE phone_number = $1", [T])).rows[0]?.injuries;
+  chk(inj === "none" && await sleeps() === before + 1, "\"my knee is better and I slept 7 hours\": the knee is cleared and the sleep is logged (#685 Codex review)", `${inj} | ${await sleeps()} sleep(s) | ${knee.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
@@ -241,6 +252,24 @@ REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT
     chk(last === "breakfast", "a meal logged before the migration keeps its send order: the backdated breakfast, sent last, is last (#650 attack)", String(last));
   } finally { await c.query("ROLLBACK"); c.release(); }
   delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4l. ONBOARDING DAYS 1–3: NO MODEL CALL ONCE THE DAY'S MESSAGE IS SPENT, AND NO MOVE PICKED BY THE MODEL (#665 review)");
+{
+  const T = "whatsapp:+27829438665";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  const [o] = await db.insert(schema.users).values({ phoneNumber: T, name: "Onboard Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120, programmeStartDate: new Date(Date.now() - 49 * 3_600_000) } as any).returning();
+  const words = await (await import("../server/core/coach")).scheduledWords(T, "onboarding", "day 2 of their programme");
+  chk(!!words && /how did yesterday go/i.test(words) && !/walk/i.test(words), "day 2's words keep the open question and drop the walk the model picked", JSON.stringify(words));
+  const shared = await import("../server/scheduler/shared");
+  const paused = process.env.PROACTIVE_PAUSED || ""; process.env.PROACTIVE_PAUSED = "false"; // this suite pauses proactive sends; the job must see the client
+  while (await shared.claimDailySlot(o.id, `spent-${Math.random()}`)) { /* the morning message used the day */ }
+  (globalThis as any).__lastCompose = "";
+  await (await import("../server/scheduler/jobs/onboarding")).runEarlyOnboarding();
+  process.env.PROACTIVE_PAUSED = paused;
+  chk(!/scheduled onboarding message/.test((globalThis as any).__lastCompose || ""), "with the day's one message spent, onboarding makes no model call", "composed anyway");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

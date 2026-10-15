@@ -4093,6 +4093,9 @@ test("onboarding goal detection: health-led goals are selectable; body-comp unch
   // The existing three are byte-identical.
   assert.strictEqual(classifyGoalFromText("1"), "fat_loss");
   assert.strictEqual(classifyGoalFromText("I want to lose fat"), "fat_loss");
+  assert.strictEqual(classifyGoalFromText("I want to build healthier habits and have more energy"), "general"); // #667 review: "build" alone is not muscle
+  assert.strictEqual(classifyGoalFromText("Ngifuna ukwehlisa isisindo nokwakha imisipha"), "recomposition"); // #667 review: losing and building is both
+  assert.strictEqual(classifyGoalFromText("I want to improve my fitness"), "general");
   assert.strictEqual(classifyGoalFromText("2"), "muscle_gain");
   assert.strictEqual(classifyGoalFromText("build muscle"), "muscle_gain");
   assert.strictEqual(classifyGoalFromText("3"), "recomposition");
@@ -10957,7 +10960,7 @@ test("day-one message: no reply shortcut the product no longer answers (\"2\" ha
   const { readFileSync } = await import("node:fs");
   const src = readFileSync("server/scheduler/jobs/onboarding.ts", "utf8");
   assert.ok(!src.includes('"2" to log') && !src.includes('"3" to log'), "Day 1 names a digit shortcut that does not exist");
-  assert.ok(src.includes("like *8500*, to log steps"), "it says how steps are actually logged");
+  assert.ok(src.includes("how much you walk today, in your own words"), "it says steps are logged in their own words (B9: no menu)");
 });
 
 test("#506 evidence: usage stats are nearest-rank per client, and a logged template body is named by its template", async () => {
