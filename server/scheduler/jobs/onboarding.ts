@@ -58,6 +58,7 @@ export async function runEarlyOnboarding(): Promise<void> {
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       if (![1, 2, 3, 4, 5, 6, 7].includes(days)) continue;
+      if (!canSendProactive(client.id)) continue; // the day's one message is spent: compose nothing, pay for nothing (#665 review)
       const name = client.name || "there";
       let msg = "";
       // DAYS 1–3 IN THE COACH'S WORDS (B9, #647): composed from what they have said and logged, so a client who said

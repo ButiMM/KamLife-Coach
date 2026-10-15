@@ -59,7 +59,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^change my goal to muscle gain$/i.test(msg) ? [{ type: "SET_GOAL", goal: "muscle_gain" }] : null;
     const fix = log586 ? log586 : front ? front : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
     content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /^I don't eat fish$/i.test(msg) ? [{ kind: "preference", subject: "no fish", statement: "I don't eat fish", detail: {} }] : /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
-  } else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
+  } else if (body.includes("this is your scheduled onboarding message")) { content = "Take a 20-minute walk today. How did yesterday go?"; (globalThis as any).__lastCompose = body; }
+  else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
   return new Response(JSON.stringify({ id: "stub", object: "chat.completion", created: 1, model: "stub",
@@ -241,6 +242,24 @@ REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT
     chk(last === "breakfast", "a meal logged before the migration keeps its send order: the backdated breakfast, sent last, is last (#650 attack)", String(last));
   } finally { await c.query("ROLLBACK"); c.release(); }
   delete process.env.CORE_WAVE2;
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4l. ONBOARDING DAYS 1–3: NO MODEL CALL ONCE THE DAY'S MESSAGE IS SPENT, AND NO MOVE PICKED BY THE MODEL (#665 review)");
+{
+  const T = "whatsapp:+27829438665";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  const [o] = await db.insert(schema.users).values({ phoneNumber: T, name: "Onboard Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120, programmeStartDate: new Date(Date.now() - 49 * 3_600_000) } as any).returning();
+  const words = await (await import("../server/core/coach")).scheduledWords(T, "onboarding", "day 2 of their programme");
+  chk(!!words && /how did yesterday go/i.test(words) && !/walk/i.test(words), "day 2's words keep the open question and drop the walk the model picked", JSON.stringify(words));
+  const shared = await import("../server/scheduler/shared");
+  const paused = process.env.PROACTIVE_PAUSED || ""; process.env.PROACTIVE_PAUSED = "false"; // this suite pauses proactive sends; the job must see the client
+  while (await shared.claimDailySlot(o.id, `spent-${Math.random()}`)) { /* the morning message used the day */ }
+  (globalThis as any).__lastCompose = "";
+  await (await import("../server/scheduler/jobs/onboarding")).runEarlyOnboarding();
+  process.env.PROACTIVE_PAUSED = paused;
+  chk(!/scheduled onboarding message/.test((globalThis as any).__lastCompose || ""), "with the day's one message spent, onboarding makes no model call", "composed anyway");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

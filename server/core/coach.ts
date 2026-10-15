@@ -458,7 +458,7 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
     if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
     const u: Understanding = { family: "other", wants: asks ? SCHEDULED[job] : `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
-    if (!words || asks) return words || null;
+    if (!words || job === "weigh") return words || null; // onboarding may ask, but a move it picks is stripped (#665 review)
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     return stripModelDirectives(words, { modelAuthored: true } as any).kept.trim() || null;
   } catch (e) {
