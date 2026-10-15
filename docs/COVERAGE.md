@@ -12,29 +12,31 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 
 **What moved since 12 Oct** (all merged 12–13 Oct; nothing merged 14 Oct, the pause): #631 #625 #627 #622 #635 #642 #644 #626 #649 #641 #648 #640 #628 #650 #651 #652 #653 #639 #656 #657 #658 #660 #661 #662 #663 #664 #643. `main` is `eca0220`.
 
+**Post-merge review (15 Oct, CTO):** of the 11 PRs merged in the pause, #643 and #639 are regressions (#676, #677), #660 has a money edge (#678); #662, #658, #661, #664 clean; the rest edges (#679–#681). Codex talk journey: #682, #683.
+
 **CI note (15 Oct):** `npm test` on `main` is 39/39 green. `main` has no push CI, so the database suite (`pg-acceptance`) only shows on PRs, and every open PR was red on the same shards. Reproduced on `main` (`eca0220`): one cause, three reds (`long-voice-tail`, `long-voice-reverts`, `long-turn-reverts`). On a Thursday, a workout correction naming "Thursday" also wrote a session on last Thursday, because two day resolvers disagree about today's own weekday name. The fix is PR #672 (#670 closed as its duplicate; its test was ported onto #672). Every other `main` shard is green locally (`photo-door` needs DNS, so it's green in CI only).
 
 ### A. What the client sends
 | Row | What testers need | Status | What's left | Where | Week |
 |---|---|---|---|---|---|
-| **A1** | A meal in words is logged (any language, any phrasing) | Built (#593, #597, #618, #619, #631, #644, #628, #639); trace proves the writes with a stub model | Same meal, same calories (#326's rest); live proof | #326 | B, I |
+| **A1** | A meal in words is logged (any language, any phrasing) | Built (#593, #597, #618, #619, #631, #644, #628, #639); trace proves the writes with a stub model | Same meal, same calories (#326's rest); live proof; modified repeat ("same pap but with chicken") copies an old meal (#677, [harm], #639 regression) | #326 #677 | B, I |
 | **A2** | Corrections ("Hayi, it was rice") | Built (#621, #604, #631 correction plus meal, #650 "remove my last meal") | Live proof | — | B |
 | **A3** | Food photo | Built (#605, #613, #615) | Live proof on the founder's phone: a plate and black coffee | #596 | I |
 | **A4** | Voice note in any language | Open: the real audio path is not proven | CTO ruling 15 Oct: a stubbed-STT end-to-end case in CI (no paid STT); real audio proven by one isiZulu and one Setswana voice note on the founder's phone | #330 | G |
 | **A5** | Steps, distance screenshot | Built (steps proven in trace) | Screenshot path not proven | — | B |
-| **A6** | Water, sleep | Built: water; sleep through the coach (#643, meal plus sleep in one message both written) | Trace 15 Oct: "I slept 5 hours" gets the old sleep line, and the turn's record shows no write, so the write is unproven | — | B |
+| **A6** | Water, sleep | Built: water; sleep through the coach (#643, meal plus sleep in one message both written) | Trace 15 Oct: "I slept 5 hours" gets the old sleep line, and the turn's record shows no write, so the write is unproven; "slept badly, taking a break" pauses check-ins 7 days (#676, [harm], #643 regression) | #676 | B |
 | **A7** | Weigh-in; progress photos | Weigh-in built (#594, #620) | Progress photos have no action | — | B |
 | **A8** | Workout done, show today's workout | Built (#618, #623); a correction naming today wrote a second session a week back (PR #672) | "My knee hurt" changes the next plan: not proven (old programme card ignores the record) | #568 | C, L |
 | **A9** | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
 | **A10** | What to eat, swaps, restaurants | Built (new coach) | Restaurant card and early commands still answer before the coach: PR #655 (batch 1), then batch 2 | #568 | C |
-| **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7); Codex talk journey 15 Oct | — | I |
+| **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Live quality only via the 07:00 worst-five (D7); Codex talk journey 15 Oct; two-week plateau judged on 7 days (#682) | #682 | I |
 | **A12** | Goal change, "am I on track" | Partly old (`misc-commands`) | SET_GOAL through the coach with confirm; trace case | #568 | C |
 | **A13** | **Memory**: uses what they told it | Built: facts stored and read every turn; "forget X" and "fine now" end the fact (#651) | Old doors don't read it (#568); live proof (L4); 9 old stores still exist (D2) | #568 | **L** |
 | **A14** | Reminders | Built (#537); held outside the window (Codex verified 13 Oct) | — | — | — |
 | **A15** | Sick or injured pause, pain | Old `sick-flow`; the welcome back after sick now reaches the client (#640) | Through the coach; trace case | — | B |
-| **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | — | — | I |
-| **A17** | Off-topic redirect | Built (#657: a coaching word no longer vetoes an explicit off-domain ask) | Live proof | — | D |
-| **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in trace) | Live proof per language; Codex talk journey 15 Oct | — | I |
+| **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | logged-day counts unchecked (#682) | #682 | I |
+| **A17** | Off-topic redirect | Built (#657: a coaching word no longer vetoes an explicit off-domain ask) | Live proof; "write me a letter to keep me motivated" declined; a log in the same message lost; "write my cousin a poem" escapes (#679, #683) | #679 #683 | D |
+| **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in trace) | Live proof per language; Codex talk journey 15 Oct; Afrikaans shame skips the shame-safe receipt (#683) | #683 | I |
 | **A19** | Promises followed up | Built (#545, #564, #629, #652: on the due day the morning stands down so "how did it go?" goes out) | Shame filter on the reply after a miss | #563 | D |
 
 ### B. What the coach sends first (**proactive**)
@@ -50,7 +52,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **B8** | Monthly narrative | Retired (#511) | — | — | — |
 | **B9** | Onboarding catch-ups | Open: day 2 is canned and can contradict day 1 (Codex 13 Oct) | PR #665 (Codex answered; CI red, see CI note) | #647 | F |
 | **B10** | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
-| **B11** | Outside 24h: approved template or nothing | Built (#653: no generic substitute) | Check-in template SID approved (founder) | #415 | J |
+| **B11** | Outside 24h: approved template or nothing | Built (#653: no generic substitute) | Check-in template SID approved (founder); founder dashboard check-in to quiet clients reaches nobody, wrong reason shown (#681) | #415 #681 | J |
 | **B12** | Opt-out on every path | Built (Codex verified 18:59 opt-out, 13 Oct) | — | — | — |
 | — | Every scheduled send through one owner | Open | — | #319 | F |
 
@@ -59,12 +61,12 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 |---|---|---|---|---|---|
 | **C1** | Signup: three natural questions, no "reply 1/2/3" | **Open: still numeric menus** (Codex) | Natural onboarding; keep consent and age gates. PR #665 starts on the floors' menus | — | E |
 | **C2** | Pay: R199, one clear message | Built (#576, #617, #662: the payment welcome is one message) | Live proof | — | E |
-| **C3** | Cancel and refund do what they say | Built (#617, #660: an owed refund or unconfirmed cancel is in the 07:00 inbox until resolved) | — | — | E |
+| **C3** | Cancel and refund do what they say | Built (#617, #660: an owed refund or unconfirmed cancel is in the 07:00 inbox until resolved) | a "refund" overwrites the unconfirmed-cancel task (#678, [harm]) | #678 | E |
 | **C4** | Delete my data | Built (#625: failed backups expire too) | — | — | H |
 | **C5** | Under 18 | Built (#574) | — | — | — |
-| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656 antibiotic ask, #658 no medicine timing) | Codex safety journey (rotation) | — | D |
+| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656 antibiotic ask, #658 no medicine timing) | Codex safety journey (rotation); "medicine ball" gets the clinical referral (#679) | #679 | D |
 | **C7** | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
-| **C8** | Referrals | Built (#663: the inviter's free month arrives) | Coach's words | — | E |
+| **C8** | Referrals | Built (#663: the inviter's free month arrives) | Coach's words; free month can be farmed: refund, reset, duplicate codes (#680) | #680 | E |
 
 ### D. Foundation, cost and quality
 | Row | Need | Status | What's left | Where | Week |
