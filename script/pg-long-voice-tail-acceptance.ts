@@ -44,7 +44,13 @@ process.env.TWILIO_AUTH_TOKEN = "test";
 process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 process.env.NODE_ENV = "production";
 
-const COACH_CONTEXT = "After-eight nights do not need cooking: plain yoghurt with fruit, or tinned fish on toast, are quick protein-first options. Your step target remains 8 000, and yesterday's 8 500 is already stored. I heard that the week has been tiring, and the Tuesday workout is now corrected to Thursday.";
+// THE CORRECTION NAMES TODAY (15 Oct). "I only did the one on <today's weekday>" went red only on a Thursday,
+// because the move and the dated beats read today's own name on two clocks (#391). Naming today every day
+// keeps that case under test whatever day CI runs; the wrong day is two days back.
+const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const SAST_DOW = new Date(Date.now() + 2 * 3_600_000).getUTCDay();
+const RIGHT_DAY = DOW[SAST_DOW], WRONG_DAY = DOW[(SAST_DOW + 5) % 7];
+const COACH_CONTEXT = `After-eight nights do not need cooking: plain yoghurt with fruit, or tinned fish on toast, are quick protein-first options. Your step target remains 8 000, and yesterday's 8 500 is already stored. I heard that the week has been tiring, and the ${WRONG_DAY} workout is now corrected to ${RIGHT_DAY}.`;
 const BASELINE_BODY = "Lerato — 8 000 steps is your target. No steps logged yet today — send your count: \"8,500 steps\" or \"walked 5km\".";
 
 // The acceptance exercises the real Coach path without a network dependency. It controls only
@@ -119,7 +125,7 @@ const NOTE = [
   "So yesterday my phone said I did 8500 steps, which I think is the most I have done in a very long time honestly, and I did not even plan it, it just happened because of the walking.",
   "I am feeling tired and a bit down about the whole thing to be honest with you, like I am putting in the work every single day but the scale is not moving and it makes me want to give up.",
   "My colleague keeps bringing those vetkoek to the office in the mornings and I have been saying no to them all week, which is not easy when you have skipped breakfast and you are hungry.",
-  "Oh and I must correct something I told you earlier in the week, I said I did my workout on Tuesday but actually I missed it, I only did the one on Thursday, so please fix that in my record.",
+  `Oh and I must correct something I told you earlier in the week, I said I did my workout on ${WRONG_DAY} but actually I missed it, I only did the one on ${RIGHT_DAY}, so please fix that in my record.`,
   "I do not want my record saying I trained on a day I did not train because then the numbers you are showing me are not really my numbers and the whole thing stops meaning anything.",
   "What should I be eating on the days when I get home after eight at night and I am too tired to cook anything proper for myself?",
   "And also how many steps should I actually be aiming for now that I am walking to the office and back every single day of the week?",
@@ -130,7 +136,7 @@ const NOTE = [
 const FACTS: Array<[where: string, name: string, re: RegExp]> = [
   ["beginning", "the named-day meal", /yesterday i had pap and chicken for lunch/i],
   ["middle", "8,500 steps", /\b8500\b/],
-  ["near the end", "the workout correction", /i said i did my workout on tuesday but actually i missed it/i],
+  ["near the end", "the workout correction", new RegExp(`i said i did my workout on ${WRONG_DAY} but actually i missed it`, "i")],
   ["throughout", "the feeling", /makes me want to give up/i],
   ["near the end", "question 1 — what to eat after eight", /what should i be eating/i],
   ["near the end", "question 2 — how many steps", /how many steps should i actually be aiming for/i],
@@ -171,8 +177,8 @@ REAL(`  fixture: ${NOTE.length} chars, ${NOTE.split(/\s+/).filter(Boolean).lengt
 REAL("1. EVERY FACT THE CLIENT SPOKE IS IN WHAT THE HANDLERS WERE GIVEN");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 await clear();
-const wrongWorkoutAt = parseMealDate("Tuesday");
-const rightWorkoutAt = parseMealDate("Thursday");
+const wrongWorkoutAt = parseMealDate(WRONG_DAY);
+const rightWorkoutAt = parseMealDate(RIGHT_DAY);
 await db.insert(schema.workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: wrongWorkoutAt });
 await pool.query("UPDATE users SET total_workouts_completed = 1, last_workout_date = $2 WHERE id = $1", [user.id, wrongWorkoutAt]);
 await processTextAsync(phone, NOTE, null, null, [], handleMessage as any, "sid-long-note");
@@ -223,7 +229,7 @@ REAL("\n3. 8,500 IS STILL 8,500 — the number is not reshaped on the way to its
   const wrongDay = sastDayKey(wrongWorkoutAt);
   const rightDay = sastDayKey(rightWorkoutAt);
   chk(workouts.length === 1 && workouts[0].day_key === rightDay,
-    "the correction removes Tuesday and leaves exactly Thursday",
+    `the correction removes ${WRONG_DAY} and leaves exactly ${RIGHT_DAY} (today)`,
     `wrong=${wrongDay} right=${rightDay} rows=${JSON.stringify(workouts)}`);
   const [derivedWorkout] = (await pool.query<{ total_workouts_completed: number; last_day: string | null }>(
     "SELECT total_workouts_completed, to_char(last_workout_date + interval '2 hours', 'YYYY-MM-DD') AS last_day FROM users WHERE id = $1", [user.id])).rows;
@@ -268,7 +274,7 @@ REAL("\n4. ONE COMPLETE POST-SENDFINAL COACHING TURN");
   chk(/step target remains 8[\s\u00a0]?000/i.test(finalBody) && /8[\s\u00a0]?500 is already stored/i.test(finalBody),
     "…and its answer to question 2, including that the 8,500 report was stored", finalBody);
   chk(/week has been tiring/i.test(finalBody), "…and the feeling/context clause", finalBody);
-  chk(/Tuesday workout is now corrected to Thursday/i.test(finalBody), "…and the correction, with no receipt mouth in front of it", finalBody);
+  chk(new RegExp(`${WRONG_DAY} workout is now corrected to ${RIGHT_DAY}`, "i").test(finalBody), "…and the correction, with no receipt mouth in front of it", finalBody);
   chk(!/no steps logged|send your count|log your steps|ask me again/i.test(finalBody),
     "the coach never asks for the steps it just stored", finalBody);
   chk(!/Eish Coach K had a moment|I don't have enough|same answer twice|target hit|steps today|Logged \d+ days/i.test(finalBody),
@@ -320,7 +326,7 @@ REAL("\n4b. THE BRAIN WAS ASKED THE WHOLE NOTE — not a window of it, not one q
     "question 1 reaches the model, in the client's own words");
   chk(inPrompt("how many steps should I actually be aiming for"),
     "question 2 reaches it too — a multi-question note is not answered one question deep");
-  chk(inPrompt("I said I did my workout on Tuesday but actually I missed it"),
+  chk(inPrompt(`I said I did my workout on ${WRONG_DAY} but actually I missed it`),
     "the correction reaches it, so the coach is not answering from a record it is still fixing");
   chk(inPrompt("makes me want to give up"),
     "the feeling reaches it, which is the part a tracker receipt always dropped");

@@ -307,7 +307,9 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   chk(/lifestyle coach, not a medical service/i.test(dsc), "control: the disclosure on its own still gets the non-clinical welcome", dsc.slice(0, 200));
   { // The takeaway line belongs to the meal written this turn, whatever the disk order or the time it is filed at (#622).
     const tu = (await pool.query("SELECT * FROM users WHERE phone_number = $1", [TESTER])).rows[0];
-    const add = (raw: string, hoursAgo: number) => pool.query("INSERT INTO meal_logs (user_id, raw_message, items, kcal_int, protein_int, source, logged_at) VALUES ($1, $2, '[]', 500, 20, 'text', now() - make_interval(mins => $3))", [tu.id, raw, Math.round(hoursAgo * 60)]);
+    // Sevenths of the time since SAST midnight, so all four stay on today at any hour (before 06:00 the 6-hour-old plate was yesterday's).
+    const sinceMidnight = (Date.now() - (await import("../server/sast")).sastDayStart().getTime()) / 1000;
+    const add = (raw: string, hoursAgo: number) => pool.query("INSERT INTO meal_logs (user_id, raw_message, items, kcal_int, protein_int, source, logged_at) VALUES ($1, $2, '[]', 500, 20, 'text', now() - make_interval(secs => $3))", [tu.id, raw, sinceMidnight * hoursAgo / 7]);
     const nudge = async () => { await pool.query("CLUSTER meal_logs USING meal_logs_user_date_idx"); // disk order = filed order, as after a vacuum
       return (await import("../server/nutrition-guardrails")).nutritionGuardrailNudge({ id: tu.id, goalType: "fat_loss" }); };
     await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [tu.id]);
