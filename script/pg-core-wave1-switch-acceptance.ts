@@ -244,6 +244,25 @@ REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4k. BACK AFTER NINE QUIET DAYS, THE COACH IS TOLD (B6, #646)");
+{
+  const T = "whatsapp:+27829438646";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  const [b] = await db.insert(schema.users).values({ phoneNumber: T, name: "Away Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any).returning();
+  await pool.query("INSERT INTO turn_ledger (user_id, input_text, reply, created_at) VALUES ($1, 'I am training for my first 5k', 'Lekker, we build to it.', now() - interval '9 days')", [b.id]);
+  (globalThis as any).__lastCompose = "";
+  await say(T, "Hey coach, I'm back");
+  const sys = (() => { try { return String(JSON.parse((globalThis as any).__lastCompose || "{}").messages?.[0]?.content || ""); } catch { return ""; } })();
+  chk(/AWAY: they last wrote 9 days ago/.test(sys) && /first 5k/.test((globalThis as any).__lastCompose || ""),
+    "back after 9 silent days, the composer is told how long and sees what they were working on (#646)", sys.slice(-400));
+  await pool.query("INSERT INTO turn_ledger (user_id, input_text, reply, created_at) VALUES ($1, 'Hey coach, I''m back', 'Welcome back!', now() - interval '1 minute')", [b.id]);
+  (globalThis as any).__lastCompose = "";
+  await say(T, "Can we plan today's run?");
+  chk(!/AWAY:/.test((globalThis as any).__lastCompose || ""), "a minute after the welcome back, the next message is not welcomed again (#666 review)", String((globalThis as any).__lastCompose).slice(-300));
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";

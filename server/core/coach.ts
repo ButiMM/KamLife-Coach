@@ -25,7 +25,7 @@ import { ONE_VOICE } from "../coach-prompt";
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
 
-export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }>; tools?: string }
+export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }>; tools?: string; away?: string }
 
 /**
  * THE PRODUCT'S FOOD TOOLS, READ FOR THIS MESSAGE (#437 reuse; #445 deleted the handlers that used to
@@ -109,7 +109,7 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
     factsForCoach(u.id).catch(() => ""),
     knownFacts(u.id).catch(() => "KNOWN FACTS: none"),
     ledgerNumbers(u, message).catch(() => ""),
-    db.select({ input: turnLedger.inputText, sent: turnLedger.deliveredBody, reply: turnLedger.reply })
+    db.select({ input: turnLedger.inputText, sent: turnLedger.deliveredBody, reply: turnLedger.reply, at: turnLedger.createdAt })
       .from(turnLedger).where(eq(turnLedger.userId, u.id)).orderBy(desc(turnLedger.createdAt)).limit(6),
   ]);
   const conversation: PreTurn["conversation"] = [];
@@ -119,7 +119,15 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
     if (said) conversation.push({ role: "assistant", content: said.slice(0, 500) });
   }
   const tools = message ? await foodTools(u, message).catch(() => "") : "";
-  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, known, numbers, conversation, tools };
+  // BACK AFTER A SILENCE (B6, #646): lastActiveAt is already this message's, so the gap is read from their last turn
+  // before it, through reentry's own day count. The composer is told, so "hi" after nine days is a welcome back.
+  const { daysSinceContact, RETURNING_DAYS } = await import("../understanding/reentry");
+  const lastTurn = turns.slice().reverse().find(t => t.input?.trim() && t.at); // the ledger row is written after the reply: this message is never in it
+  const gap = lastTurn ? daysSinceContact(lastTurn.at) : null;
+  const away = gap !== null && gap >= RETURNING_DAYS
+    ? `AWAY: they last wrote ${gap} days ago. Welcome them back by name, warmly, and name what they were last working on (from what they have told you or the conversation). No guilt, no catching up, no list of what they missed.`
+    : undefined;
+  return { userId: u.id, name: (u.name || "").split(" ")[0] || "there", facts, known, numbers, conversation, tools, away };
 }
 
 const UNDERSTAND_SYSTEM = `You read one WhatsApp message from a coaching client and say what they want from this turn.
@@ -200,6 +208,7 @@ export async function compose(openai: OpenAI, pre: PreTurn, message: string, u: 
     pre.facts || "WHAT THIS CLIENT HAS TOLD YOU: nothing yet.",
     pre.numbers ? `THEIR REAL NUMBERS (authoritative — quote these, never invent):\n${pre.numbers}` : "THEIR REAL NUMBERS: none on record.",
     pre.tools || "",
+    pre.away || "",
     u ? `THIS TURN: ${u.family} — they want: ${u.wants}${u.one_question ? `\nIf you need one thing, ask: ${u.one_question}` : ""}` : "",
   ].filter(Boolean).join("\n\n");
   const r = await openai.chat.completions.create({
