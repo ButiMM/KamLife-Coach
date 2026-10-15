@@ -58,12 +58,19 @@ export async function runEarlyOnboarding(): Promise<void> {
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       if (![1, 2, 3, 4, 5, 6, 7].includes(days)) continue;
+      if (!canSendProactive(client.id)) continue; // the day's one message is spent: compose nothing, pay for nothing (#665 review)
       const name = client.name || "there";
       let msg = "";
-      if (days === 1) {
-        msg = `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• what you ate, in your own words, to log food\n• your step count, like *8500*, to log steps\n\nOne small action today is better than a perfect week planned and not started.`;
+      // DAYS 1–3 IN THE COACH'S WORDS (B9, #647): composed from what they have said and logged, so a client who said
+      // "my doctor said rest" is not asked about a session. The floors below carry no menus and no "reply X".
+      const firstName = name.split(" ")[0];
+      const words = days <= 3 ? await (await import("../../core/coach")).scheduledWords(client.phoneNumber, "onboarding", `day ${days} of their programme`) : null;
+      if (words) {
+        msg = words;
+      } else if (days === 1) {
+        msg = `Day 1, ${firstName}. Your programme is live. Tell me what you eat and how much you walk today, in your own words, and I'll keep track.`;
       } else if (days === 2) {
-        msg = `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`;
+        msg = `Day 2, ${firstName}. How did yesterday go? Tell me in your own words. No judgment, just forward.`;
       } else if (days === 3) {
         const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Log your steps — pick what works for you:*\n\n*1. Just type the number* (easiest)\nSend me a number any time. Like: *8500*. I'll log it.\n\n*2. Send a screenshot*\nOpen Samsung Health, Apple Health, or Google Fit. Screenshot your step count. Send me the photo and I'll read it.\n\n*3. Auto-sync* (set up once, never log again)\nReply *connect steps* and I'll send you the one-time setup guide.`;
         msg = day3Msg;

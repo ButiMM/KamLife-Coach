@@ -450,11 +450,13 @@ const SCHEDULED = {
   // B5: the programme moved up a phase; the facts of it come in `extra`, and "today" is appended as the move.
   phase: "Their training programme has just moved up a phase (see JUST HAPPENED). By first name, in two short lines, say they earned it from the real session count and name the new phase",
   silence: "They have not written for a few days or more (see the conversation dates). A short, warm hello by first name, in one or two lines: no guilt, no catching up, nothing about what they missed, no numbers",
+  // B9 (#647): days 1–3 of their programme (JUST HAPPENED says which), from what they have actually told you and logged.
+  onboarding: "They started their programme in the last few days (JUST HAPPENED says which day). By first name, in two or three short lines, from what they have told you and logged so far: meet them where they are, and if it fits ask one open question about how it is going. No menus, no 'reply X', and never ask about a session they told you they could not do",
 } as const;
 
 /** The new coach's words for a scheduled message, or null (the caller sends its plain floor). Never throws. */
 export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED, extra = ""): Promise<string | null> {
-  const asks = job === "weigh";
+  const asks = job === "weigh" || job === "onboarding"; // these words may ask, and are the whole message
   if (!coreWave4For(phone)) return null;
   try {
     const pre = await readPreTurn(phone);
@@ -465,7 +467,7 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
     if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
     const u: Understanding = { family: "other", wants: asks ? SCHEDULED[job] : `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
-    if (!words || asks) return words || null;
+    if (!words || job === "weigh") return words || null; // onboarding may ask, but a move it picks is stripped (#665 review)
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     return stripModelDirectives(words, { modelAuthored: true } as any).kept.trim() || null;
   } catch (e) {
