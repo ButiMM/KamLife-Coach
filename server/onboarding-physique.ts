@@ -29,7 +29,7 @@ import {
   recommendGoalFromRead, formatPhysiqueFocusLine,
 } from "./physique-analysis";
 
-export const MEDICAL_QUESTION = `Any medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
+export const MEDICAL_QUESTION = `Any medical conditions I must know about? For example diabetes, high blood pressure, a heart condition, HIV (on ARVs) or PCOS. Or say *none*.`;
 
 /**
  * THE ASK — and the CONSENT, in the same breath (2026-08-06, founder directive).
@@ -167,7 +167,7 @@ async function analyseAndAdvance(user: any, phone: string, openai: OpenAI): Prom
       profileNotes: base ? `${base} goalrec:${rec.goal}` : `goalrec:${rec.goal}`,
       onboardingState: "ASK_GOAL_CONFIRM",
     }).where(eq(users.phoneNumber, phone));
-    const msg = `Before-photos locked in ✅${focus ? `\n\n${focus}` : ""}\n\nOne honest thing, coach to client: you picked *${GOAL_LABEL[chosenGoal] || chosenGoal}*, but ${rec.reason}\n\nMy recommendation: *${GOAL_LABEL[rec.goal] || rec.goal}*.\n\n1️⃣ Go with your coach's read (recommended)\n2️⃣ Keep my original choice\n\nEither way, we start today.`;
+    const msg = `Before-photos locked in ✅${focus ? `\n\n${focus}` : ""}\n\nOne honest thing, coach to client: you picked *${GOAL_LABEL[chosenGoal] || chosenGoal}*, but ${rec.reason}\n\nMy recommendation: *${GOAL_LABEL[rec.goal] || rec.goal}*. Go with my read, or keep your original choice? Either way, we start today.`;
     await logChat(user.id, "[Physique Read]", msg, "ONBOARD_PHYSIQUE_REC");
     await sendWhatsApp(phone, msg);
     return;

@@ -626,7 +626,7 @@ export async function handleMiscCommands(ctx: {
         // own definition says so, and it is the divisor for the averages on the next line. Shown
         // as bare "Days logged" it read as a claim about everything the client did, one line under
         // the training count it silently excludes: "Sessions: 4" above "Days logged: 0/7".
-        return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n🍽️ Food logged: *${truth.window.daysLogged}/7 days*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}\n\n*${act.todo}*`;
+        return `*${name} — last 7 days*\n\n💪 Sessions: *${truth.sessions}*\n🍽️ Food logged: *${truth.window.daysLogged}/7 days*\n🔥 Avg: *${truth.window.avgKcal} kcal* · *${truth.window.avgProtein}g* protein\n👟 Avg steps: *${truth.avgSteps.toLocaleString()}*${weightLine}${act.todo?.trim() ? `\n\n*${act.todo}*` : ""}`; // no empty "**" when there is no one thing (#659)
       }
       // A LOG IS A ROW, NOT A CALORIE COUNT (C11, 2026-09-16). This asked the day's TOTAL whether
       // the client had logged, so a zero-calorie day — black coffee, a Coke Zero, water, or any

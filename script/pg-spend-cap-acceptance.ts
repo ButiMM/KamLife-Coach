@@ -136,6 +136,19 @@ REAL("\n5. EVERY MODEL CLIENT IS PRICED WHERE THE CAP READS (#570)");
     `gpt ${g0} → ${await priced("gpt")}, grocery ${r0} → ${await priced("grocery")}`);
 }
 
+REAL("\n6. THE RATE LIMITER HAS ITS TABLE ON A DATABASE BUILT FROM MIGRATIONS ALONE (#343)");
+{
+  // rate_limits was created only by the boot block in server/index.ts: on a fresh database the insert threw and
+  // the limiter failed open, so 15 messages a minute per phone was no limit at all.
+  const { checkRateLimit } = await import("../server/routes");
+  const phone = "whatsapp:+27820000343";
+  await pool.query("DELETE FROM rate_limits WHERE phone = $1", [phone]).catch(() => {});
+  const verdicts: boolean[] = [];
+  for (let i = 0; i < 16; i++) verdicts.push(await checkRateLimit(phone));
+  chk(verdicts.slice(0, 15).every(Boolean) && verdicts[15] === false, "the 16th message inside a minute is limited", JSON.stringify(verdicts));
+  await pool.query("DELETE FROM rate_limits WHERE phone = $1", [phone]).catch(() => {});
+}
+
 REAL(`\npg-spend-cap-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}\n`);
 await pool.end();
 process.exit(failed === 0 ? 0 : 1);

@@ -452,11 +452,13 @@ const SCHEDULED = {
   silence: "They have not written for a few days or more (see the conversation dates). A short, warm hello by first name, in one or two lines: no guilt, no catching up, nothing about what they missed, no numbers",
   // B4: Sunday's report card. Its numbers go out above these words, so the words recognise, never recount.
   weekly: "It is Sunday: their weekly report card (JUST HAPPENED has its numbers, which are sent above your words). By first name, in one or two short lines, name the one thing in those numbers that mattered most this week, warmly and honestly. Don't repeat the numbers",
+  // B9 (#647): days 1–3 of their programme (JUST HAPPENED says which), from what they have actually told you and logged.
+  onboarding: "They started their programme in the last few days (JUST HAPPENED says which day). By first name, in two or three short lines, from what they have told you and logged so far: meet them where they are, and if it fits ask one open question about how it is going. No menus, no 'reply X', and never ask about a session they told you they could not do",
 } as const;
 
 /** The new coach's words for a scheduled message, or null (the caller sends its plain floor). Never throws. */
 export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED, extra = ""): Promise<string | null> {
-  const asks = job === "weigh";
+  const asks = job === "weigh" || job === "onboarding"; // these words may ask, and are the whole message
   if (!coreWave4For(phone)) return null;
   try {
     const pre = await readPreTurn(phone);
@@ -467,7 +469,7 @@ export async function scheduledWords(phone: string, job: keyof typeof SCHEDULED,
     if (extra) pre.numbers += `\nJUST HAPPENED: ${extra}`;
     const u: Understanding = { family: "other", wants: asks ? SCHEDULED[job] : `${SCHEDULED[job]}. Ask nothing and give no instruction: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const words = (await compose(await openaiClient(), pre, `(No message from ${pre.name}: this is your scheduled ${job} message.)`, u))?.trim();
-    if (!words || asks) return words || null;
+    if (!words || job === "weigh") return words || null; // onboarding may ask, but a move it picks is stripped (#665 review)
     const { stripModelDirectives } = await import("../brain/reply-verifier");
     return stripModelDirectives(words, { modelAuthored: true } as any).kept.trim() || null;
   } catch (e) {
@@ -731,7 +733,10 @@ async function runActions(p: { phone: string; message: string; user: any; source
       && (await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when === "today";
     if (!sleepOk && !rest.length) return null;
     const logged = rest.length ? await logThroughExecutor(phone, message, rest, conf, p.sourceMessageId) : null; // "chicken for supper and I slept 5 hours"
-    const r = sleepOk ? await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false }) : null;
+    const life = await import("../handlers/lifecycle");
+    const healed = sleepOk ? await life.markInjuryRecovered(user, phone, message, m) : null; // "my knee is better and I slept 7 hours" (#685 review)
+    const slept = sleepOk ? await life.logSleep(user, message, m) : null; // sleep only, never the lifecycle doors (#676)
+    const r = [healed, slept].filter(Boolean).join("\n\n") || null;
     if (!logged) return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
     if (!logged.performed && !r) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
     const receipt = [(logged.card + logged.reply).trim(), r].filter(Boolean).join("\n\n");

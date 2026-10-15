@@ -205,7 +205,11 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   // "DINNER WAS THE SAME AS LUNCH" (#326): the reading names no food, only another meal. The repeat owner copies it with
   // its own calories; the scanner asked the client to type the items out, which is admin.
   const repeatText = `${action.meal || ""} ${action.foodText || ""}`.trim().toLowerCase();
-  if (repeatText.includes("same")) {
+  // A PURE REPEAT ONLY (#677): in the client's own sentence, nothing added or swapped after "same". "The same pap but
+  // with chicken" and "same as yesterday plus an apple" are new plates for the scanner, not a copy of an old one.
+  // A "yes" to a parked repeat has no message of its own: the action's words are read instead (#686 review).
+  const sameTail = ((ctx.clientMessage || (ctx.preConfirmed ? action.foodText : "") || "").toLowerCase().split(/[.!?;\n]/).find(x => /\bsame\b/.test(x)) || "").split(/\bsame\b/).slice(1).join(" ");
+  if (repeatText.includes("same") && sameTail && !/\b(but|with|instead|plus|except|without|extra|also)\b|\band\s+(?:a|an|some|\d)/.test(sameTail)) {
     // "Should my dinner be the same as lunch?" is a question, not a report: nothing is copied (#639 review).
     if (isAskingNotReporting(ctx.clientMessage || "")) return { performed: false, facts: {} };
     const before = turnMutations().length;

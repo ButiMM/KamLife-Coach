@@ -107,10 +107,15 @@ export async function handleRefundRequest(user: any, phone: string): Promise<str
   // The founder's task, with a deadline, in the escalation queue the dashboard already works from.
   // ONE task per client: the generic billing escalation ("refund" in the message) may already have
   // opened it, so the guarantee's details are written INTO that case rather than beside it.
+  // ADDED TO, NEVER OVERWRITTEN (#678): an open "PayFast did NOT confirm the cancel: cancel by hand" task stays on it, and
+  // the higher priority of the two stands, or the founder refunds, closes the task, and the live token charges them again.
   const founderTask = async (priority: "urgent" | "high" | "normal", text: string) => {
-    const [open] = await db.select({ id: escalations.id }).from(escalations)
+    const [open] = await db.select({ id: escalations.id, text: escalations.triggerMessage, priority: escalations.priority }).from(escalations)
       .where(and(eq(escalations.userId, user.id), eq(escalations.reason, "billing"), eq(escalations.status, "open"))).limit(1);
-    const fields = { triggerMessage: text.slice(0, 500), priority, slaDeadline: escalationSLA(priority) };
+    const rank = (p?: string | null) => ["normal", "high", "urgent"].indexOf(p || "normal");
+    const keep = open && rank(open.priority) > rank(priority) ? open.priority as typeof priority : priority;
+    const merged = !open?.text ? text : open.text.includes(text) ? open.text : `${open.text}\n+ ${text}`; // a repeated "refund" keeps the task as it is (#687 review)
+    const fields = { triggerMessage: merged.slice(0, 1000), priority: keep, slaDeadline: escalationSLA(keep) };
     await (open ? db.update(escalations).set(fields).where(eq(escalations.id, open.id)) : db.insert(escalations).values({ userId: user.id, reason: "billing", ...fields }))
       .catch((e) => console.error("[REFUND] escalation write failed:", e));
   };
