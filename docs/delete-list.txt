@@ -8,7 +8,6 @@ server/understanding/perception.ts
 server/brain/coach-brain.ts
 server/brain/client-snapshot.ts
 server/handlers/food-commands.ts
-server/normalizer-fidelity.ts
 server/one-action.ts
 server/memory.ts
 #
