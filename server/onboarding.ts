@@ -968,17 +968,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   // Legacy path: experience was captured before budget → complete directly
   if (state === "ASK_BUDGET") {
     const lower = msg.toLowerCase();
-    let budget = "100_300";
-    let budgetLevel = "medium";
-    if (/^\s*1\s*$/.test(msg) || lower.includes("under") || lower.includes("1500") || lower.includes("1,500") || lower.includes("budget") || lower.includes("tight")) {
-      budget = "under_100"; budgetLevel = "low";
-    } else if (/^\s*2\s*$/.test(msg) || lower.includes("3000") || lower.includes("3,000") || lower.includes("medium")) {
-      budget = "100_300"; budgetLevel = "medium";
-    } else if (/^\s*3\s*$/.test(msg) || lower.includes("5000") || lower.includes("5,000")) {
-      budget = "300_600"; budgetLevel = "high";
-    } else if (/^\s*4\s*$/.test(msg) || lower.includes("over") || lower.includes("premium") || lower.includes("no limit")) {
-      budget = "over_600"; budgetLevel = "premium";
-    }
+    // THE TOP OF THE RANGE THEY NAME (#667 review): "R3,000 to R5,000" names both amounts and is the R3k–R5k tier.
+    const top = Math.max(0, ...(lower.match(/\d[\d,]*/g) || []).map(a => Number(a.replace(/,/g, ""))).filter(a => a >= 100));
+    const tier = (/^\s*[1-4]\s*$/.test(msg)) ? Number(msg.trim())
+      : /\b(over|more than|premium|no limit)\b|\+/.test(lower) || top > 5000 ? 4 : top > 3000 ? 3 : top > 1500 ? 2
+      : top > 0 || /\b(under|tight|low)\b/.test(lower) ? 1 : 2;
+    const [budget, budgetLevel] = ([["under_100", "low"], ["100_300", "medium"], ["300_600", "high"], ["over_600", "premium"]] as const)[tier - 1];
 
     if (user.trainingExperience) {
       // Legacy path: experience already captured, complete now
@@ -1101,9 +1096,14 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const isNone = lower.includes("none") || lower.includes("nothing") || pick.includes("6") || pick.includes("8");
     // SAID, NOT DENIED (#667 review): "I don't have diabetes or high blood pressure" names two conditions it denies. A word
     // counts when no "no / not / don't / never / without" comes before it in its clause ("no diabetes, but my BP is high").
+    // The nearest cue before the word decides: "No diabetes, I have high blood pressure" denies one and states the other.
     const said = (re: RegExp) => lower.split(/\bbut\b|[.;!?\n]/).some(c => {
       const at = c.search(re);
-      return at >= 0 && !/\b(no|not|never|without|none)\b|n['’]t\b/.test(c.slice(0, at));
+      if (at < 0) return false;
+      const before = c.slice(0, at).replace(/(?:n['’]t|\bnot|\bnever)\s+have\b/g, " nope ");
+      const denied = [...before.matchAll(/\b(?:no|not|never|without|none|nope)\b|n['’]t\b/g)].pop()?.index ?? -1;
+      const stated = [...before.matchAll(/\b(?:have|has|got|diagnosed)\b/g)].pop()?.index ?? -1;
+      return denied < 0 || stated > denied;
     });
     const conditions: string[] = [];
     if (pick.includes("1") || said(/diab/)) conditions.push("diabetes");

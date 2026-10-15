@@ -112,7 +112,7 @@ run_case "insulin omission is answered without the doctor-today line" server/lif
 
 # 9. ONBOARDING HAS NO PREGNANT ANSWER — the menu's "1" and "Yes, I'm pregnant" become postpartum.
 run_case "onboarding records a pregnancy as postpartum" server/onboarding.ts \
-  '    if (/^1\b/.test(lower) || /\bpregnan/.test(lower) || user.lifeSituation === "pregnant") {' \
+  '    if (/^1\b/.test(lower) || (/\bpregnan/.test(lower) && !/(?:\bnot|n['"'"'’]t|\bno longer|\bnever)\s+(?:\w+\s+){0,2}pregnan/.test(lower)) || user.lifeSituation === "pregnant") {' \
   '    if (false) {' || failed=$((failed + 1))
 
 # 10. A TYPOGRAPHIC APOSTROPHE DEFEATS EVERY PATTERN (Codex attack @ 8e4f231) — "I’m pregnant"

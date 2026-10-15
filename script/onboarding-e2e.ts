@@ -203,6 +203,26 @@ const FLOW_E: Flow = {
   targetInputs: { weight: 70, goal: "fat_loss", situation: "postpartum_breastfeeding", days: 4, gender: "female", age: 29, heightCm: 165, exp: "beginner" },
 };
 
+// #667 review: a stated condition after a denied one, and an ordinary fitness goal.
+const FLOW_F: Flow = {
+  name: "Flow F — 'No diabetes, I have high blood pressure' and a fitness goal",
+  phone: "whatsapp:+27000000106",
+  turns: [
+    { send: "hi", expectState: "ASK_POPIA" },
+    { send: "yes", expectState: "WELCOME" },
+    { send: "Bongani", expectState: "ASK_GENDER" },
+    { send: "male", expectState: "ASK_AGE_NEW" },
+    { send: "41", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "82kg, 1.76m", expectState: "ASK_GOAL" },
+    { send: "I want to improve my fitness", expectState: "ASK_MEDICAL" },
+    { send: "No diabetes, I have high blood pressure", expectState: "ASK_INJURIES" },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "Just walking", expectState: "COMPLETE" },
+  ],
+  final: { name: "Bongani", goalType: "general", medicalConditions: "hypertension" },
+  targetInputs: { weight: 82, goal: "general", situation: "office", days: 4, gender: "male", age: 41, heightCm: 176, exp: "beginner" },
+};
+
 let failures = 0;
 function fail(flow: string, what: string): void {
   failures++;
@@ -286,6 +306,7 @@ await runFlow(FLOW_B);
 await runFlow(FLOW_C);
 await runFlow(FLOW_D);
 await runFlow(FLOW_E);
+await runFlow(FLOW_F);
 
 // An unreported default may support provisional targets, but it is not a scale reading and must
 // never become either current truth or a weight event.
