@@ -8,6 +8,14 @@ import {
   deliveryStats, todaySAST, thisWeekUTC, PRICING, inArray,
 } from "../shared";
 import { gptCosts } from "../../../shared/schema";
+import { sendProactive } from "../proactive-decision";
+import { deliveryAccepted } from "../../outbound-delivery";
+// A TARGET MOVES ONLY WITH ITS MESSAGE (#319): through the guarded send, so a client held after a crisis, a medication
+// referral or a life context (pregnancy, grief) is not re-targeted; and a message that was not delivered changes nothing.
+const told = async (client: Parameters<typeof sendProactive>[0], job: string, body: string) => {
+  const d = await sendProactive(client, { claimed: job }, body);
+  return !!d && deliveryAccepted(d);
+};
 export async function runSubscriptionExpiryCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
   const clients = await getActiveClients({ ignorePause: true }); // billing must run even when coaching is paused
@@ -355,12 +363,12 @@ export async function runAutoCalAdjust(): Promise<void> {
         if (newCal !== null) {
           // Claim before mutating targets + sending — DB-backed per 3-week window, restart-safe.
           if (!(await claimProactive(client.id, "cal_adjust", `w${windowKey}`))) continue;
+          if (msg && !(await told(client, "cal_adjust", msg))) continue;
           // Baseline AND overlay. The baseline is what tomorrow's adaptation reasons from; the
           // overlay is the number this message quotes, so it must be true today too.
           const patch: any = { baselineCalorieTarget: newCal, calorieTarget: newCal };
           if (newProt !== null) { patch.baselineProteinTarget = newProt; patch.proteinTarget = newProt; }
           await db.update(users).set(patch).where(eq(users.id, client.id));
-          if (msg) await sendWhatsApp(client.phoneNumber, msg);
           adjusted++;
         }
       } catch { /* skip individual client errors */ }
@@ -410,14 +418,14 @@ export async function runStepTargetAdaptation(): Promise<void> {
         if (hitRate >= 0.8 && stepsTarget < 12000) {
           if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.min(12000, stepsTarget + 1000);
+          if (!(await told(client, "step_target_adapt", `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`))) continue;
           await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`);
           bumped++;
         } else if (hitRate <= 0.3 && stepsTarget > 5000) {
           if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.max(5000, stepsTarget - 1000);
+          if (!(await told(client, "step_target_adapt", `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`))) continue;
           await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`);
           reduced++;
         }
       } catch { /* skip individual */ }
