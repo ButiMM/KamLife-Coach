@@ -4093,6 +4093,9 @@ test("onboarding goal detection: health-led goals are selectable; body-comp unch
   // The existing three are byte-identical.
   assert.strictEqual(classifyGoalFromText("1"), "fat_loss");
   assert.strictEqual(classifyGoalFromText("I want to lose fat"), "fat_loss");
+  assert.strictEqual(classifyGoalFromText("I want to build healthier habits and have more energy"), "general"); // #667 review: "build" alone is not muscle
+  assert.strictEqual(classifyGoalFromText("Ngifuna ukwehlisa isisindo nokwakha imisipha"), "recomposition"); // #667 review: losing and building is both
+  assert.strictEqual(classifyGoalFromText("I want to improve my fitness"), "general");
   assert.strictEqual(classifyGoalFromText("2"), "muscle_gain");
   assert.strictEqual(classifyGoalFromText("build muscle"), "muscle_gain");
   assert.strictEqual(classifyGoalFromText("3"), "recomposition");

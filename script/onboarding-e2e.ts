@@ -159,6 +159,70 @@ const FLOW_C: Flow = {
   targetInputs: { weight: 100, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "beginner" },
 };
 
+// C1: answered in their own words. "lose 20kg" is fat loss (not option 2) and "type 2 diabetes" is diabetes (not option 2).
+const FLOW_D: Flow = {
+  name: "Flow D — every answer in words, with numbers inside them",
+  phone: "whatsapp:+27000000104",
+  turns: [
+    { send: "hi", expectState: "ASK_POPIA" },
+    { send: "yes", expectState: "WELCOME" },
+    { send: "Kagiso", expectState: "ASK_GENDER" },
+    { send: "male", expectState: "ASK_AGE_NEW" },
+    { send: "34", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "90kg, 1.80m", expectState: "ASK_GOAL" },
+    { send: "I want to lose 20kg", expectState: "ASK_MEDICAL", expectReply: [/Lose fat/i] },
+    { send: "type 2 diabetes", expectState: "ASK_INJURIES", expectReply: [/diabetes noted/i] },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "gym", expectState: "ASK_GYM_SETUP" },
+    { send: "Full gym (machines)", expectState: "COMPLETE" },
+  ],
+  final: { name: "Kagiso", gender: "male", age: 34, heightCm: 180, goalType: "fat_loss", medicalConditions: "diabetes", trainingMode: "gym" },
+  targetInputs: { weight: 90, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 34, heightCm: 180, exp: "beginner" },
+};
+
+// #667 review: answers in words that deny, and an answer in isiZulu.
+const FLOW_E: Flow = {
+  name: "Flow E — denials and isiZulu, in words",
+  phone: "whatsapp:+27000000105",
+  turns: [
+    { send: "hi", expectState: "ASK_POPIA" },
+    { send: "yes", expectState: "WELCOME" },
+    { send: "Thandi", expectState: "ASK_GENDER" },
+    { send: "female", expectState: "ASK_FEMALE_FOCUS" },
+    { send: "full body", expectState: "ASK_POSTPARTUM" },
+    { send: "I'm not pregnant, I gave birth two months ago", expectState: "ASK_AGE_NEW", expectReply: [/breastfeeding/i] },
+    { send: "29", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "70kg, 1.65m", expectState: "ASK_GOAL" },
+    { send: "Ngifuna ukwehlisa isisindo", expectState: "ASK_MEDICAL" },
+    { send: "I don't have diabetes or high blood pressure", expectState: "ASK_INJURIES" },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "gym", expectState: "ASK_GYM_SETUP" },
+    { send: "Full gym (machines)", expectState: "COMPLETE" },
+  ],
+  final: { name: "Thandi", gender: "female", lifeSituation: "postpartum_breastfeeding", goalType: "fat_loss", medicalConditions: "none" },
+  targetInputs: { weight: 70, goal: "fat_loss", situation: "postpartum_breastfeeding", days: 4, gender: "female", age: 29, heightCm: 165, exp: "beginner" },
+};
+
+// #667 review: a stated condition after a denied one, and an ordinary fitness goal.
+const FLOW_F: Flow = {
+  name: "Flow F — 'No diabetes, I have high blood pressure' and a fitness goal",
+  phone: "whatsapp:+27000000106",
+  turns: [
+    { send: "hi", expectState: "ASK_POPIA" },
+    { send: "yes", expectState: "WELCOME" },
+    { send: "Bongani", expectState: "ASK_GENDER" },
+    { send: "male", expectState: "ASK_AGE_NEW" },
+    { send: "41", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "82kg, 1.76m", expectState: "ASK_GOAL" },
+    { send: "I want to improve my fitness", expectState: "ASK_MEDICAL" },
+    { send: "No diabetes, I have high blood pressure", expectState: "ASK_INJURIES" },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "Just walking", expectState: "COMPLETE" },
+  ],
+  final: { name: "Bongani", goalType: "general", medicalConditions: "hypertension" },
+  targetInputs: { weight: 82, goal: "general", situation: "office", days: 4, gender: "male", age: 41, heightCm: 176, exp: "beginner" },
+};
+
 let failures = 0;
 function fail(flow: string, what: string): void {
   failures++;
@@ -187,6 +251,8 @@ async function runFlow(flow: Flow): Promise<void> {
       fail(flow.name, `turn ${i + 1} (${JSON.stringify(t.send)}): state ${gotState}, expected ${t.expectState}\n    reply: ${JSON.stringify(reply.slice(0, 160))}`);
       return;
     }
+    // C1: signup is a conversation, never a numbered menu (the gate's own "numbered menu" pattern).
+    if (/reply\s+\*?1\*?\s*(?:,|or|\/)|1️⃣[\s\S]{0,120}2️⃣|\b1\)\s[^\n]{0,80}\n\s*2\)\s/i.test(reply)) fail(flow.name, `turn ${i + 1} (${JSON.stringify(t.send)}): a numbered menu\n    reply: ${JSON.stringify(reply.slice(0, 200))}`);
     for (const re of t.expectReply || []) {
       if (!re.test(reply)) fail(flow.name, `turn ${i + 1} (${JSON.stringify(t.send)}): reply missing ${re}\n    reply: ${JSON.stringify(reply.slice(0, 200))}`);
     }
@@ -238,6 +304,9 @@ async function runFlow(flow: Flow): Promise<void> {
 await runFlow(FLOW_A);
 await runFlow(FLOW_B);
 await runFlow(FLOW_C);
+await runFlow(FLOW_D);
+await runFlow(FLOW_E);
+await runFlow(FLOW_F);
 
 // An unreported default may support provisional targets, but it is not a scale reading and must
 // never become either current truth or a weight event.

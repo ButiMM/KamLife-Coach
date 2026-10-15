@@ -26,7 +26,7 @@ import { lifeContextReply } from "./life-context";
 // bare "yes" is asked again rather than guessed. "2" still means No, as it did on the old menu, so
 // a client mid-signup at deploy cannot become postpartum by answering the menu they were shown;
 // an old "1" (postpartum) now reads as pregnant — the safe direction: numbers withheld, person flagged.
-const POSTPARTUM_QUESTION = `One more — are you currently pregnant, recently gave birth, or breastfeeding?\n\n1️⃣ Pregnant\n2️⃣ No — continue\n3️⃣ Recently gave birth or breastfeeding`;
+const POSTPARTUM_QUESTION = `One more: are you pregnant, did you recently give birth, or are you breastfeeding? Or say *no* if none of these.`;
 
 /**
  * "No thanks" to an OPTIONAL onboarding step — one owner, two callers (2026-08-06).
@@ -502,7 +502,7 @@ const BULK_RESUME: Array<{ state: string; missing: (u: any) => boolean; ask: (u:
   { state: "ASK_GENDER", missing: u => !u.gender, ask: () => `Male or female?` },
   { state: "ASK_AGE_NEW", missing: u => !u.age, ask: () => `How old are you?` },
   { state: "ASK_WEIGHT_HEIGHT", missing: u => !u.currentWeight || !u.heightCm, ask: u => u.currentWeight && !u.heightCm ? `And your height?\n\nExample: *1.72m* or *172cm*` : `What's your weight and height?\n\nExample: *78kg, 1.72m*` },
-  { state: "ASK_GOAL", missing: u => !u.goalType, ask: () => `Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both` },
+  { state: "ASK_GOAL", missing: u => !u.goalType, ask: () => `Main goal: lose fat, build muscle, both, or just feel healthier? Say it in your own words.` },
   { state: "ASK_MEDICAL", missing: u => u.medicalConditions == null, ask: () => MEDICAL_QUESTION },
   { state: "ASK_INJURIES", missing: u => u.injuries == null, ask: () => `Any injuries or joints I should train around? Reply *none* if not.` },
   { state: "ASK_EQUIPMENT", missing: u => !u.gymName && !u.homeEquipment, ask: () => `Where will you train — a gym, or at home?` },
@@ -681,7 +681,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const gender = isMale ? "male" : "female";
     if (isFemale) {
       await db.update(users).set({ gender, onboardingState: "ASK_FEMALE_FOCUS" }).where(eq(users.phoneNumber, phone));
-      return `Got it. What's your main training focus?\n\n1️⃣ *Full body* — tone and strengthen everything\n2️⃣ *Glutes & legs* — build and sculpt the lower body`;
+      return `Got it. What's your main training focus: *full body* (tone and strengthen everything), or *glutes and legs* (build the lower body)?`;
     }
     await db.update(users).set({ gender, onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
     return `How old are you?`;
@@ -690,7 +690,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   // ---- ASK_FEMALE_FOCUS ----
   if (state === "ASK_FEMALE_FOCUS") {
     const lower = msg.toLowerCase().trim();
-    const isGlutes = msg.includes("2") || lower.includes("glute") || lower.includes("bum") || lower.includes("butt") || lower.includes("leg") || lower.includes("lower") || lower.includes("booty");
+    const isGlutes = /^\s*2\s*$/.test(msg) || lower.includes("glute") || lower.includes("bum") || lower.includes("butt") || lower.includes("leg") || lower.includes("lower") || lower.includes("booty");
     const focusArea = isGlutes ? "glutes_legs" : null;
     await db.update(users).set({
       ...(focusArea ? { primaryFocusArea: focusArea } : { primaryFocusArea: null }),
@@ -704,7 +704,8 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase().trim();
     // Pregnant — by the menu, in words, or already recorded by the safety guard on an earlier turn.
     // Recorded, a person flagged, and no weight-loss promise; the numbers stay withheld from here.
-    if (/^1\b/.test(lower) || /\bpregnan/.test(lower) || user.lifeSituation === "pregnant") {
+    // "I'm not pregnant, I gave birth two months ago" is the postpartum answer, not this one (#667 review).
+    if (/^1\b/.test(lower) || (/\bpregnan/.test(lower) && !/(?:\bnot|n['’]t|\bno longer|\bnever)\s+(?:\w+\s+){0,2}pregnan/.test(lower)) || user.lifeSituation === "pregnant") {
       await db.update(users).set({ lifeSituation: "pregnant", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
       if (user.lifeSituation !== "pregnant") await checkEscalation(user.id, "Said during onboarding: pregnant").catch(() => {});
       return user.lifeSituation === "pregnant" ? "How old are you?" : `${lifeContextReply({ context: "pregnancy", refer: true, demand: "pause" })}\n\nHow old are you?`;
@@ -750,7 +751,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     // health_condition) are now reachable at signup so a gogo or someone managing their
     // sugar is never funnelled into a fat-loss deficit (2026-07-21 spine surgery).
     if (!looksLikeGoalAnswer(msg)) {
-      return `What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both\n4️⃣ Just get healthier & feel good`;
+      return `Main goal: lose fat, build muscle, both, or just feel healthier? Say it in your own words.`;
     }
     const goal = classifyGoalFromText(msg);
 
@@ -869,7 +870,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const takeRec = /^1\b/.test(msg.trim()) || /\b(yes|yebo|go with|your read|recommendation|switch|do that|sounds right|trust you)\b/.test(gcLower);
     const keepOwn = !takeRec && (/^2\b/.test(msg.trim()) || /\b(keep|stay|mine|original|no thanks|my choice)\b/.test(gcLower));
     if (!takeRec && !keepOwn) {
-      return `Quick one so we build the right plan:\n\n1️⃣ Go with my read (recommended)\n2️⃣ Keep your original choice`;
+      return `Quick one so we build the right plan: go with my read (recommended), or keep your original choice?`;
     }
     const newGoal = takeRec && recommended ? recommended : (user.goalType || "fat_loss");
     const wConf = parseFloat(user.currentWeight || "0") || (user.gender === "female" ? 65 : 75);
@@ -967,17 +968,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   // Legacy path: experience was captured before budget → complete directly
   if (state === "ASK_BUDGET") {
     const lower = msg.toLowerCase();
-    let budget = "100_300";
-    let budgetLevel = "medium";
-    if (msg.includes("1") || lower.includes("under") || lower.includes("1500") || lower.includes("1,500") || lower.includes("budget") || lower.includes("tight")) {
-      budget = "under_100"; budgetLevel = "low";
-    } else if (msg.includes("2") || lower.includes("3000") || lower.includes("3,000") || lower.includes("medium")) {
-      budget = "100_300"; budgetLevel = "medium";
-    } else if (msg.includes("3") || lower.includes("5000") || lower.includes("5,000")) {
-      budget = "300_600"; budgetLevel = "high";
-    } else if (msg.includes("4") || lower.includes("over") || lower.includes("premium") || lower.includes("no limit")) {
-      budget = "over_600"; budgetLevel = "premium";
-    }
+    // THE TOP OF THE RANGE THEY NAME (#667 review): "R3,000 to R5,000" names both amounts and is the R3k–R5k tier.
+    const top = Math.max(0, ...(lower.match(/\d[\d,]*/g) || []).map(a => Number(a.replace(/,/g, ""))).filter(a => a >= 100));
+    const tier = (/^\s*[1-4]\s*$/.test(msg)) ? Number(msg.trim())
+      : /\b(over|more than|premium|no limit)\b|\+/.test(lower) || top > 5000 ? 4 : top > 3000 ? 3 : top > 1500 ? 2
+      : top > 0 || /\b(under|tight|low)\b/.test(lower) ? 1 : 2;
+    const [budget, budgetLevel] = ([["under_100", "low"], ["100_300", "medium"], ["300_600", "high"], ["over_600", "premium"]] as const)[tier - 1];
 
     if (user.trainingExperience) {
       // Legacy path: experience already captured, complete now
@@ -991,7 +987,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       onboardingState: "ASK_EXPERIENCE",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Last one — training experience?\n\n1️⃣ Beginner — just starting out\n2️⃣ Some experience — been active before\n3️⃣ Intermediate — 1-2 years consistent\n4️⃣ Advanced — 2+ years serious lifting`;
+    return `Last one: how much have you trained? Just starting out, some experience, intermediate (1-2 years consistent) or advanced (2+ years of serious lifting)?`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
@@ -1022,7 +1018,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
           bmi: bmi.toString(),
           onboardingState: "ASK_GOAL",
         }).where(eq(users.phoneNumber, phone));
-        return `Using ~${estimatedCm}cm as an estimate — I'll adjust if you measure later.\n\nMain goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+        return `Using ~${estimatedCm}cm as an estimate — I'll adjust if you measure later.\n\nMain goal: lose fat, build muscle, both, or just feel healthier? Say it in your own words.`;
       }
     }
 
@@ -1076,10 +1072,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       if (weightMatch) {
         await handleWeightLog(phone, user, weight, { suppressCustomerLifecycle: true });
       }
-      const shortLabel = isFemale ? "Short (under 160cm)" : "Short (under 165cm)";
-      const avgLabel   = isFemale ? "Average (163cm)"     : "Average (172cm)";
-      const tallLabel  = isFemale ? "Tall (172cm+)"       : "Tall (181cm+)";
-      return `Got it — ${weight}kg.\n\nWhat's your height? If you're not sure, pick the closest:\n\n1️⃣ ${shortLabel}\n2️⃣ ${avgLabel}\n3️⃣ ${tallLabel}\n\nOr type it: *1.72m* or *172cm*`;
+      const shortLabel = isFemale ? "under 160cm" : "under 165cm";
+      const avgLabel   = isFemale ? "about 163cm" : "about 172cm";
+      const tallLabel  = isFemale ? "172cm+"      : "181cm+";
+      return `Got it — ${weight}kg.\n\nWhat's your height? Type it, like *1.72m* or *172cm*. Not sure? Say *short* (${shortLabel}), *average* (${avgLabel}) or *tall* (${tallLabel}).`;
     }
 
     const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
@@ -1091,18 +1087,30 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       await handleWeightLog(phone, { ...user, heightCm: heightCmVal, bmi: bmi.toString() }, weight, { suppressCustomerLifecycle: true });
     }
     await db.update(users).set({ onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `${weight}kg, ${heightCmVal}cm — got it. Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    return `${weight}kg, ${heightCmVal}cm — got it. Main goal: lose fat, build muscle, both, or just feel healthier? Say it in your own words.`;
   }
 
   if (state === "ASK_MEDICAL") {
     const lower = msg.toLowerCase();
-    const isNone = lower.includes("none") || lower.includes("nothing") || msg.includes("6") || msg.includes("8");
+    const pick = /^[\d\s,&]+$/.test(msg.trim()) ? msg : ""; // "1, 3" from an old menu; "type 2 diabetes" is words (C1)
+    const isNone = lower.includes("none") || lower.includes("nothing") || pick.includes("6") || pick.includes("8");
+    // SAID, NOT DENIED (#667 review): "I don't have diabetes or high blood pressure" names two conditions it denies. A word
+    // counts when no "no / not / don't / never / without" comes before it in its clause ("no diabetes, but my BP is high").
+    // The nearest cue before the word decides: "No diabetes, I have high blood pressure" denies one and states the other.
+    const said = (re: RegExp) => lower.split(/\bbut\b|[.;!?\n]/).some(c => {
+      const at = c.search(re);
+      if (at < 0) return false;
+      const before = c.slice(0, at).replace(/(?:n['’]t|\bnot|\bnever)\s+have\b/g, " nope ");
+      const denied = [...before.matchAll(/\b(?:no|not|never|without|none|nope)\b|n['’]t\b/g)].pop()?.index ?? -1;
+      const stated = [...before.matchAll(/\b(?:have|has|got|diagnosed)\b/g)].pop()?.index ?? -1;
+      return denied < 0 || stated > denied;
+    });
     const conditions: string[] = [];
-    if (msg.includes("1") || lower.includes("diab")) conditions.push("diabetes");
-    if (msg.includes("2") || lower.includes("blood pressure") || lower.includes("hypert")) conditions.push("hypertension");
-    if (msg.includes("3") || lower.includes("heart")) conditions.push("heart_condition");
-    if (msg.includes("4") || lower.includes("hiv") || lower.includes("arv")) conditions.push("hiv_arvs");
-    if (msg.includes("5") || lower.includes("pcos")) conditions.push("pcos");
+    if (pick.includes("1") || said(/diab/)) conditions.push("diabetes");
+    if (pick.includes("2") || said(/blood pressure|hypert/)) conditions.push("hypertension");
+    if (pick.includes("3") || said(/heart/)) conditions.push("heart_condition");
+    if (pick.includes("4") || said(/\bhiv\b|\barvs?\b/)) conditions.push("hiv_arvs");
+    if (pick.includes("5") || said(/pcos/)) conditions.push("pcos");
     const hasDiabetes = conditions.includes("diabetes");
     const hasHeart = conditions.includes("heart_condition");
     const hasHIV = conditions.includes("hiv_arvs");
@@ -1123,7 +1131,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         .filter(c => ["heart_condition", "diabetes", "hiv_arvs"].includes(c))
         .map(c => c === "heart_condition" ? "heart condition" : c === "hiv_arvs" ? "HIV/ARVs" : "diabetes")
         .join(" and ");
-      return `Got it — ${conditionNames} noted.\n\n⚠️ *Medical note:* Coach K will adjust your programme and nutrition for your condition, but is not a substitute for your doctor or dietitian. Please make sure your doctor knows you are starting a new exercise and eating plan.\n\nCoach K will never tell you to stop or change your medication. If any recommendation conflicts with what your doctor told you — follow your doctor.\n\nAny injuries? Bad knees, back, shoulder? Or say None.`;
+      return `Got it — ${conditionNames} noted.\n\n⚠️ *Medical note:* Coach K will adjust your programme and nutrition for your condition, but is not a substitute for your doctor or dietitian. Please make sure your doctor knows you are starting a new exercise and eating plan.\n\nYour medication is your doctor's call, never mine. If anything I suggest conflicts with what your doctor told you, follow your doctor.\n\nAny injuries? Bad knees, back, shoulder? Or say None.`;
     }
 
     return `Any injuries? Bad knees, back, shoulder? Or say None.`;
@@ -1144,8 +1152,8 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   if (state === "ASK_EXPERIENCE") {
     const lower = msg.toLowerCase();
     let exp = "beginner";
-    if (msg.includes("3") || lower.includes("intermediate")) exp = "intermediate";
-    else if (msg.includes("4") || lower.includes("advanced")) exp = "advanced";
+    if (/^\s*3\s*$/.test(msg) || /\b(intermediate|1-2 years)\b/.test(lower)) exp = "intermediate";
+    else if (/^\s*4\s*$/.test(msg) || lower.includes("advanced")) exp = "advanced";
 
     await db.update(users).set({ trainingExperience: exp }).where(eq(users.phoneNumber, phone));
 
@@ -1156,7 +1164,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     // Legacy path: budget not yet captured
     await db.update(users).set({ onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
-    return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    return `Roughly what's your monthly grocery budget: under R1,500, R1,500 to R3,000, R3,000 to R5,000, or over R5,000?`;
   }
   // Duplicate ASK_BUDGET handler removed — it was dead code shadowed by main handler at line ~606.
 
