@@ -969,13 +969,13 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase();
     let budget = "100_300";
     let budgetLevel = "medium";
-    if (pick.includes("1") || lower.includes("under") || lower.includes("1500") || lower.includes("1,500") || lower.includes("budget") || lower.includes("tight")) {
+    if (/^\s*1\s*$/.test(msg) || lower.includes("under") || lower.includes("1500") || lower.includes("1,500") || lower.includes("budget") || lower.includes("tight")) {
       budget = "under_100"; budgetLevel = "low";
-    } else if (pick.includes("2") || lower.includes("3000") || lower.includes("3,000") || lower.includes("medium")) {
+    } else if (/^\s*2\s*$/.test(msg) || lower.includes("3000") || lower.includes("3,000") || lower.includes("medium")) {
       budget = "100_300"; budgetLevel = "medium";
-    } else if (pick.includes("3") || lower.includes("5000") || lower.includes("5,000")) {
+    } else if (/^\s*3\s*$/.test(msg) || lower.includes("5000") || lower.includes("5,000")) {
       budget = "300_600"; budgetLevel = "high";
-    } else if (pick.includes("4") || lower.includes("over") || lower.includes("premium") || lower.includes("no limit")) {
+    } else if (/^\s*4\s*$/.test(msg) || lower.includes("over") || lower.includes("premium") || lower.includes("no limit")) {
       budget = "over_600"; budgetLevel = "premium";
     }
 
@@ -1145,8 +1145,8 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   if (state === "ASK_EXPERIENCE") {
     const lower = msg.toLowerCase();
     let exp = "beginner";
-    if (pick.includes("3") || lower.includes("intermediate")) exp = "intermediate";
-    else if (pick.includes("4") || lower.includes("advanced")) exp = "advanced";
+    if (/^\s*3\s*$/.test(msg) || /\b(intermediate|1-2 years)\b/.test(lower)) exp = "intermediate";
+    else if (/^\s*4\s*$/.test(msg) || lower.includes("advanced")) exp = "advanced";
 
     await db.update(users).set({ trainingExperience: exp }).where(eq(users.phoneNumber, phone));
 
