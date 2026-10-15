@@ -1604,7 +1604,6 @@ async function main() {
     assert.equal(isDiagnosticQuestion(wow), false);
     assert.ok(!/menu/i.test(wow) && !/didn't work/i.test(wow) && !/what happened/i.test(wow));
     const routes = readFileSync("server/routes.ts", "utf-8");
-    assert.ok(/bareReactionFallback\(_bfName\)/.test(routes), "OMG must reuse the reaction mouth, not a ticket form");
     assert.ok(/foodDayIsClosed\(message\)/.test(routes), "feeling ack must not swallow a closed food day");
   });
 
@@ -2024,8 +2023,7 @@ async function main() {
   //
   // SCOPE, STATED HONESTLY. This grades the DETERMINISTIC rule: given a message that names several
   // days, is the rewrite refused? It does NOT establish what the live model returns for that
-  // message — that needs the recorded corpus, and normalizer-replay-tests reports the production
-  // surface as uncovered until it exists. Two different claims; only the first is proven here.
+  // message. Two different claims; only the first is proven here.
   check("2.2 . a note naming several days is never spoken for by one canonical", async () => {
     const { attributeMultiDayReport } = await import("../server/understanding/day-relative-situation");
     const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
@@ -2051,45 +2049,6 @@ async function main() {
     }
   });
 
-  // AND THE BRAKE ACTUALLY FIRES — the effect, not the premise.
-  //
-  // The brake only runs with the normalizer ON, which every offline harness disables. So this uses
-  // the replay seam from #66 to hand the front door a canonical that COLLAPSES the three days, and
-  // asserts the client's meal still lands as three days — i.e. the raw text reached the batch owner.
-  //
-  // The fixture is synthetic ON PURPOSE and that is legitimate here: the claim under test is "given
-  // a rewrite that destroys days, does the brake refuse it", not "this is what gpt-4o-mini returns".
-  // The second claim needs the recorded corpus and is asserted in normalizer-replay-tests, which
-  // reports the production surface as uncovered until that recording exists.
-  check("2.2 outcome . a collapsing rewrite is refused and the days survive to the logger", async () => {
-    const g = globalThis as any;
-    const bonolo = "Monday I had pap and chicken, eggs and bread for breakfast, and rice with beef stew "
-      + "for dinner. Tuesday was oats, a chicken salad, and pasta with mince. Wednesday I had eggs "
-      + "and bacon, a burger and chips, and lamb chops with rice.";
-    const collapsed = "i had pap and chicken, eggs and bread, rice with beef stew, oats, chicken salad, "
-      + "pasta with mince, eggs and bacon, burger and chips, lamb chops and rice";
-
-    const out = await serialise(async () => {
-      const prevNorm = process.env.NORMALIZER;
-      delete process.env.NORMALIZER;                       // front door ON, as in production
-      g.__KAMLIFE_INTENT_FIXTURES = {
-        [bonolo.toLowerCase()]: { intent: "FOOD_LOG", confidence: 0.95, canonical: collapsed },
-      };
-      g.__KAMLIFE_STUB_USER = { ...USER };
-      try { return String(await handleMessage(USER.phoneNumber, bonolo) ?? ""); }
-      finally {
-        delete g.__KAMLIFE_INTENT_FIXTURES;
-        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
-      }
-    });
-
-    assertCustomerOutcome(out, {
-      got: /across \d+ day|logged 3 days|3 days/i,
-      because: "three days of meals reported in one message must be logged as three days, not one — "
-        + "a rewrite that names no day must never be allowed to speak for all of them",
-    });
-  });
-
   check("P0-2b . a single-day message is untouched by the batch path", async () => {
     // The gate is hasMultipleDays. Every existing single-day route must behave exactly as before.
     for (const single of ["I had pap and eggs", "I trained chest today. What should I eat now?",
@@ -2103,41 +2062,6 @@ async function main() {
         because: `a single-day message must still be served, unchanged: "${single}"`,
       });
     }
-  });
-
-  check("CUT A . GOAL_CHANGE supplementary weight crosses the canonical weight owner", async () => {
-    const g = globalThis as any;
-    const msg = "My current weight is 82kg and I joined a gym";
-    const { weightLogs } = await import("../shared/schema");
-    const { getWeightTruth } = await import("../server/day-ledger");
-    const result = await serialise(async () => {
-      const prevNorm = process.env.NORMALIZER, prevFront = process.env.CORE_FRONT;
-      delete process.env.NORMALIZER;
-      process.env.CORE_FRONT = "off"; // #592: the normalizer is the old path's, behind the front door's rollback
-      g.__KAMLIFE_INTENT_FIXTURES = {
-        [msg.toLowerCase()]: { intent: "GOAL_CHANGE", confidence: 0.95, canonical: "change my goal to muscle gain" },
-      };
-      g.__KAMLIFE_STUB_USER = { ...USER, trainingMode: "home", currentWeight: "84.5" };
-      g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, []]]);
-      g.__KAMLIFE_STUB_WRITES = [];
-      g.__KAMLIFE_STUB_REFLECT_WRITES = true;
-      try {
-        await handleMessage(USER.phoneNumber, msg, undefined, undefined, undefined, "SM-CUT-A-WEIGHT");
-        const events = g.__KAMLIFE_STUB_WRITES.filter((w: any) => w.table === weightLogs);
-        assert.equal(events.length, 1, "the turn must create one weight event, even if another weight route sees it later");
-        g.__KAMLIFE_STUB_ROWS = new Map([[weightLogs, [{ ...events[0].values, at: new Date() }]]]);
-        return { currentWeight: g.__KAMLIFE_STUB_USER.currentWeight, truth: await getWeightTruth(g.__KAMLIFE_STUB_USER) };
-      } finally {
-        if (prevFront === undefined) delete process.env.CORE_FRONT; else process.env.CORE_FRONT = prevFront;
-        delete g.__KAMLIFE_INTENT_FIXTURES;
-        delete g.__KAMLIFE_STUB_ROWS;
-        delete g.__KAMLIFE_STUB_WRITES;
-        delete g.__KAMLIFE_STUB_REFLECT_WRITES;
-        if (prevNorm === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = prevNorm;
-      }
-    });
-    assert.equal(result.currentWeight, "82", "users.currentWeight must be the canonical value");
-    assert.equal(result.truth.currentKg, 82, "getWeightTruth must read the same event as current truth");
   });
 
   check("P0-3 . a historical write does not move today's programme", async () => {

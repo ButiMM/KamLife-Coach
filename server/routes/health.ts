@@ -8,7 +8,6 @@ import { requireAdminKey } from "./auth";
 import { deliveryStats, jobRegistry, dailyProactiveCount, DAILY_PROACTIVE_CAP } from "../scheduler/shared";
 import { isTwilioCircuitOpen } from "../utils";
 import { engineLive } from "../understanding/live";
-import { normalizerLive } from "../normalizer-fidelity";
 
 /**
  * WHICH BUILD IS ANSWERING (2026-08-20).
@@ -27,7 +26,6 @@ export function runningBuild() {
     version: (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 7) || process.env.APP_VERSION || "dev",
     runtime: {
       engineLive: engineLive() ? "on" as const : "off" as const,
-      normalizer: normalizerLive() ? "on" as const : "off" as const,
     },
     bootedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   };
