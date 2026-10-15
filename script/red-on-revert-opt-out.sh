@@ -124,14 +124,10 @@ run_case "an ordinary unpause lifts the opt-out" server/health-state.ts \
   '  if (isOptedOut(user) && !opts.optOut) return false;' \
   '' || failed=$((failed + 1))
 
-# 11. A SUBSTITUTE COUNTS AS DELIVERY (Codex @ bbffa67) — the founder's text is reported and logged as sent.
-run_case "the admin door treats a substituted template as its message" server/routes/admin.ts \
-  '      if (!deliveryAccepted(outcome)) return' \
-  '      if (false) return' || failed=$((failed + 1))
 
 restore_case
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-opt-out: FAILED — $failed mechanism(s) unguarded"
   exit 1
 fi
-echo "red-on-revert-opt-out: GREEN — 11/11 behavioral reverts caught"
+echo "red-on-revert-opt-out: GREEN — 10/10 behavioral reverts caught"

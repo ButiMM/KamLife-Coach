@@ -15,6 +15,7 @@ import { db } from "../db";
 import { mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { sastDayStart, slotFromSastHour } from "../utils";
+import { mealDayStart } from "../sast";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
 import { logChat } from "./chat-log";
 import { isAskingNotReporting } from "../utils";
@@ -71,7 +72,7 @@ export async function handleMealRepeat(ctx: {
     : 0;
 
   try {
-    const todayStart = sastDayStart();
+    const todayStart = mealDayStart(); // before 05:00 the food day is the one that ended (#582): "dinner same as lunch" at 00:30
     // Always fetch last 3 days — covers all possible references
     const windowStart = new Date(todayStart.getTime() - 3 * 86_400_000);
     const allMeals = await db.select().from(mealLogs)

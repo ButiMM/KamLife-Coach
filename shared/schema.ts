@@ -730,6 +730,13 @@ export const sentProactive = pgTable("sent_proactive", {
   sentAtIdx: index("sent_proactive_sent_at_idx").on(table.sentAt),
 }));
 
+/** #322: the one action a client was asked to confirm ("reply yes to log it"), stored so a redeploy doesn't lose it. */
+export const pendingConfirms = pgTable("pending_confirms", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  action: jsonb("action").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const sentProactiveRelations = relations(sentProactive, ({ one }) => ({
   user: one(users, { fields: [sentProactive.userId], references: [users.id] }),
 }));

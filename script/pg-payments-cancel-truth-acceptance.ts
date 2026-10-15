@@ -319,6 +319,17 @@ chk(!promisesNoCharge(c3.reply), "a cancel PayFast did not confirm does not prom
 chk(admitsNotConfirmed(c3.reply), "the client is told the billing cancel is not yet confirmed", `reply: ${JSON.stringify(c3.reply)}`);
 chk(/\+?27820000974/.test(c3.founder) && admitsNotConfirmed(c3.founder),
   "the founder is told to cancel this client's billing by hand", `founder: ${JSON.stringify(c3.founder)}`);
+// …AND IT STAYS IN FRONT OF THEM (#572): a founder task that the 07:00 inbox lists, with its age, until it is resolved.
+{
+  const { founderMorningInbox } = await import("../server/safety-detection");
+  const [task] = (await pool.query("SELECT e.id FROM escalations e JOIN users u ON u.id = e.user_id WHERE u.phone_number = $1 AND e.reason = 'billing' AND e.status = 'open'", [L.phone])).rows;
+  await pool.query("UPDATE escalations SET created_at = now() - interval '3 days' WHERE id = $1", [task?.id ?? 0]);
+  const inbox = await founderMorningInbox();
+  chk(!!task && /Money tasks open/.test(inbox || "") && /• 3d — PayFast did NOT confirm/.test(inbox || ""),
+    "an unconfirmed cancel is a founder task, listed every morning with its age (#572)", JSON.stringify(inbox));
+  await pool.query("UPDATE escalations SET status = 'resolved', resolved_at = now() WHERE id = $1", [task?.id ?? 0]);
+  chk(!/PayFast did NOT confirm/.test((await founderMorningInbox()) || ""), "…until it is resolved in the dashboard");
+}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n4. PAYFAST CHARGES THE CANCELLED SUBSCRIPTION — the charge does not undo the client's decision");
@@ -521,6 +532,9 @@ REAL("\n12. CODEX AUDIT #606 — a refund stays a refund, a pregnant payer gets 
   const Q = await makeClient("27820000983", "Queen Welcome");
   await postItn(signItn(itnFields(Q.digits, "COMPLETE", "tok-queen-1", "pf-queen-1", "alpha")), true);
   chk(/Welcome to KamLife Coach[\s\S]*Goal: fat loss/.test(sentTo(Q.phone)), "control: an ordinary new payer still gets the full welcome", JSON.stringify(sentTo(Q.phone).slice(0, 200)));
+  const toQ = wire.filter(w => w.to === Q.phone);
+  chk(toQ.length === 1 && /reply \*workout\*/.test(toQ[0].body) && !/morning and evening/.test(toQ[0].body),
+    "…in ONE message, with Day 1 a \"workout\" away, not four more bubbles (C2)", `${toQ.length} message(s): ${JSON.stringify(toQ.map(w => w.body.slice(0, 60)))}`);
   _setTwilioClientForTests(null);
 
   const R = await makeClient("27820000984", "Refilwe New");
@@ -530,6 +544,26 @@ REAL("\n12. CODEX AUDIT #606 — a refund stays a refund, a pregnant payer gets 
   await pool.query("INSERT INTO payment_events (provider, provider_payment_id, phone, amount_gross, payment_status, raw_body) VALUES ('payfast', 'pf-sipho-0', $1, '149', 'COMPLETE', $2)", [S.phone, JSON.stringify({ token: "tok-sipho-1" })]);
   await postItn(signItn(itnFields(S.digits, "COMPLETE", "tok-sipho-1", "pf-sipho-1", "alpha", "149.00")));
   chk((await row(S.phone)).subscription_status === "active", "control: an earlier subscriber's token still renews at R149");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+REAL("\n13. A REFERRAL WORKS END TO END (C8): the friend's first message names the code, their payment earns the inviter a month");
+// ════════════════════════════════════════════════════════════════════════
+{
+  const I = await makeClient("27820000987", "Inviter Kam", { subscriptionStatus: "active", referralCode: "KAM7XQ" }); // a code workout.ts issues
+  const renews0 = new Date(Date.now() + 10 * 86_400_000);
+  await pool.query("UPDATE users SET subscription_renews_at = $2 WHERE id = $1", [I.id, renews0]);
+  const F = { digits: "27820000988", phone: "whatsapp:+27820000988" };
+  for (const t of ["users", "payment_events", "shadow_replies"]) await pool.query(`DELETE FROM ${t} WHERE ${t === "users" ? "phone_number" : "phone"} = $1`, [F.phone]);
+  _resetOutboundDedupe(); _resetInteractionCorrelation();
+  await processTextAsync(F.phone, "Hi, I was referred by KAM7XQ", null, null, [], handleMessage as any, "SMref1");
+  await new Promise(r => setTimeout(r, 1500));
+  const friend = (await pool.query("SELECT id, referred_by FROM users WHERE phone_number = $1", [F.phone])).rows[0];
+  chk(friend?.referred_by === I.id, "the share link's \"Hi, I was referred by KAM7XQ\" records who referred them", JSON.stringify(friend));
+  await postItn(signItn(itnFields(F.digits, "COMPLETE", "tok-friend-1", "pf-friend-1", "alpha")));
+  const renews1 = new Date((await pool.query("SELECT subscription_renews_at r FROM users WHERE id = $1", [I.id])).rows[0].r);
+  chk(renews1.getTime() - renews0.getTime() > 29 * 86_400_000, "…and when the friend pays, the inviter gets the free month they were promised",
+    `${renews0.toISOString().slice(0, 10)} → ${renews1.toISOString().slice(0, 10)}`);
 }
 
 server.close();

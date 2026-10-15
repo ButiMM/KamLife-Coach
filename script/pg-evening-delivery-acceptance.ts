@@ -192,8 +192,8 @@ REAL("\n2. THE DEFECT — OUTSIDE the window, the coaching does not reach them")
   const bodies = freeformSent();
   chk(bodies.length === 1 && isEveningCoaching(bodies[0]),
     "the coaching is attempted as freeform first", JSON.stringify(bodies.length));
-  chk(templatesSent().includes(SID.reengage),
-    "…is rejected by the closed window, and the generic check-in goes instead",
+  chk(!templatesSent().includes(SID.reengage),
+    "…is rejected by the closed window, and the generic check-in is NOT sent in its place (#327)",
     JSON.stringify(templatesSent()));
   chk(!templatesSent().includes(SID.daily),
     "the MORNING template is not pressed into evening service — it opens \"Morning {{1}}\"",
@@ -201,39 +201,19 @@ REAL("\n2. THE DEFECT — OUTSIDE the window, the coaching does not reach them")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n3. THE RECORD DOES NOT CLAIM THE COACHING LANDED");
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-// The body stored was already honest. The INTENT was not: filed as PROACTIVE, a substitution was
-// indistinguishable from a message that reached the client, so "today's coaching never arrived"
-// was true in the world and unreadable in the ledger.
+REAL("\n3. NOTHING IS RECORDED AS SENT, AND THE CALLER IS TOLD SO (#327)");
+// ═══════════════════════════════════════════════════════════════════════════
+// The generic "Coach K checking in" is a different message from the coaching, so it never goes in
+// its place. With no template of its own and no SMS number, the coaching did not land: the
+// outcome is `dropped`, and no row claims a delivery.
 {
   const h = await history();
-  chk(h.length === 1, "exactly one row is written for the substituted send", JSON.stringify(h.length));
-  chk(!!h[0] && isCheckIn(h[0].body),
-    "the stored body is the check-in the client READ", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
-  chk(!!h[0] && !isEveningCoaching(h[0].body),
-    "…and NOT the coaching they never saw", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
-  chk(!!h[0] && h[0].intent === "PROACTIVE_SUBSTITUTED",
-    "the status says a substitute went out, not a delivery", JSON.stringify(h.map(r => r.intent)));
-}
-
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-REAL("\n3b. AND THE CALLER IS TOLD SO — the outcome and the record must agree");
-// ══════════════════════════════════════════════════════════════════════════════════════════════
-// The intent discriminator is only half the truth: a caller that asks "did this reach them?" must
-// hear no, or it will act on a message the client never read. Graded through the transport
-// directly, because the job does not return its outcome. Without this assertion the reporting
-// half of Cut 6 could be flipped back to "fallback" and nothing here would notice.
-{
+  chk(h.length === 0, "no row claims the coaching, or a substitute, reached them", JSON.stringify(h.map(r => r.intent)));
   await reset();
   stubTwilio(true);
   const outcome = await sendWhatsApp(phone, "Lerato, haven't heard from you today — no stress.\n\n*Log one meal.*");
-  chk(outcome === "substituted",
-    "a send that degraded to the generic check-in reports `substituted`, not `fallback`",
-    String(outcome));
-  const h = await history();
-  chk(!!h[0] && h[0].intent === "PROACTIVE_SUBSTITUTED",
-    "…and the ledger agrees with the outcome", JSON.stringify(h.map(r => r.intent)));
+  chk(outcome === "dropped" && !templatesSent().includes(SID.reengage),
+    "a send outside the window with no template of its own reports `dropped`, and no generic template goes", `${outcome} | ${JSON.stringify(templatesSent())}`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -253,6 +233,8 @@ REAL("\n4. A MESSAGE THAT HAS ITS OWN TEMPLATE IS UNAFFECTED — Cut 6 still wor
   const h = await history();
   chk(h.length === 1 && h[0].intent === "PROACTIVE",
     "it is recorded as a delivery, NOT a substitution", JSON.stringify(h.map(r => r.intent)));
+  chk(!!h[0] && /your KamLife plan for today is ready/.test(h[0].body),
+    "…and the stored body is the template the client READ, not the text it stood in for", JSON.stringify(h[0]?.body.slice(0, 80) || ""));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -266,17 +248,15 @@ REAL("\n5. NOTHING DOWNSTREAM TREATS A SUBSTITUTION AS COACHING DELIVERED");
   await runEveningAccountability();
   const { rows: loops } = await pool.query(
     "SELECT status FROM client_actions WHERE user_id = $1", [user.id]).catch(() => ({ rows: [] } as any));
-  chk(loops.length === 0, "a substituted evening opens no open loop", JSON.stringify(loops));
+  chk(loops.length === 0, "an evening that did not land opens no open loop", JSON.stringify(loops));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
-// The reader that asks "what was the last automated coach message?" filters on the delivery
-// intent, so marking a substitution changes what it can see. If it matched PROACTIVE alone, the
-// newest message the client received would be invisible and the model would be handed an OLDER
-// one as "something you said" — the client quotes the check-in back and the coach denies sending
-// it. The discriminator must not cost the snapshot its newest truth.
+// The reader that asks "what was the last automated coach message?" must name what the client
+// actually read. Today's evening did not reach them and nothing went in its place (#327), so the
+// newest message they read is still yesterday's plan, and no check-in they never saw is named.
 {
   await reset();
   // An ordinary proactive lands yesterday, inside the snapshot's two-day window…
@@ -284,7 +264,7 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
     `INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at)
      VALUES ($1, NULL, 'Morning Lerato — your plan for today is ready.', 'PROACTIVE', now() - interval '20 hours')`,
     [user.id]);
-  // …and today's evening send degrades to the generic check-in.
+  // …and today's evening send is rejected by the closed window.
   stubTwilio(true);
   await sendWhatsApp(phone, "Lerato, haven't heard from you today — no stress.\n\n*Log one meal.*");
   await new Promise(r => setTimeout(r, 2000));
@@ -292,10 +272,8 @@ REAL("\n6. THE SNAPSHOT STILL NAMES THE MESSAGE THEY ACTUALLY READ");
   const snapshot = await buildClientSnapshot({ ...user, id: user.id });
   const line = snapshot.split("\n").find(l => l.includes("Last automated coach message")) || "";
   chk(!!line, "the snapshot carries a last-automated-message line at all", JSON.stringify(snapshot.slice(0, 120)));
-  chk(isCheckIn(line), "…and it is the check-in the client READ, not the older plan",
-    JSON.stringify(line.slice(0, 140)));
-  chk(!/your plan for today is ready/i.test(line),
-    "…so the model is not handed a stale message as the newest one", JSON.stringify(line.slice(0, 140)));
+  chk(/your plan for today is ready/i.test(line) && !isCheckIn(line),
+    "…and it is the plan the client READ, never a check-in that did not go (#327)", JSON.stringify(line.slice(0, 140)));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

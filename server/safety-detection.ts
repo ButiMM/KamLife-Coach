@@ -22,6 +22,34 @@ export function escalationSLA(priority: string): Date {
   return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
 }
 
+/**
+ * THE FOUNDER'S MORNING INBOX (07:00 SAST). Overdue escalations, and (#572) every open billing task, a refund
+ * owed or a PayFast cancel not confirmed, with its age, every morning until it is resolved in the dashboard: money
+ * a client is owed, or billing that may still be running, never drops out of sight because its SLA passed quietly.
+ * null = nothing to say.
+ */
+export async function founderMorningInbox(now = new Date()): Promise<string | null> {
+  const [{ db }, { escalations }, { and, eq, lte, inArray, asc }] = await Promise.all([import("./db"), import("../shared/schema"), import("drizzle-orm")]);
+  const overdue = await db.select({ userId: escalations.userId, reason: escalations.reason, priority: escalations.priority })
+    .from(escalations).where(and(eq(escalations.status, "open"), lte(escalations.slaDeadline, now))).limit(20);
+  const money = await db.select({ at: escalations.createdAt, text: escalations.triggerMessage })
+    .from(escalations).where(and(eq(escalations.reason, "billing"), inArray(escalations.status, ["open", "claimed"])))
+    .orderBy(asc(escalations.createdAt)).limit(10);
+  if (!overdue.length && !money.length) return null;
+  const parts: string[] = [];
+  if (overdue.length) {
+    const urgent = overdue.filter(e => e.priority === "urgent"), high = overdue.filter(e => e.priority === "high").length;
+    parts.push(urgent.length
+      ? `🚨 KamLife SLA BREACH — ${overdue.length} open escalation${overdue.length > 1 ? "s" : ""} past deadline\n\nUrgent: ${urgent.length} | High: ${high}\n${urgent.map(e => `• ${e.reason} (${e.userId.slice(0, 8)})`).join("\n")}`
+      : `📋 KamLife morning inbox — ${overdue.length} escalation${overdue.length > 1 ? "s" : ""} to clear\n\nUrgent: 0 | High: ${high}`);
+  }
+  if (money.length) {
+    const days = (at: Date | null) => at ? Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 86_400_000)) : 0;
+    parts.push(`💸 Money tasks open: ${money.length} (listed every morning until resolved)\n${money.map(t => `• ${days(t.at)}d — ${String(t.text || "billing task").slice(0, 160)}`).join("\n")}`);
+  }
+  return `${parts.join("\n\n")}\n\nOpen your dashboard inbox when you're up.`;
+}
+
 export function detectEscalation(message: string): EscalationDecision {
   const m = message.toLowerCase();
   // Ordering matters (first match wins).
