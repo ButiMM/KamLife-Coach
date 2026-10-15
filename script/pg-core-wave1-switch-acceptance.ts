@@ -43,6 +43,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^Slept badly last night, taking a break from the gym today$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
+      : /^My knee is better and I slept 7 hours last night$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
@@ -185,6 +186,11 @@ REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
   const tired = await say(T, "Slept badly last night, taking a break from the gym today");
   const notes = (await pool.query("SELECT profile_notes FROM users WHERE phone_number = $1", [T])).rows[0]?.profile_notes || "";
   chk(!/paused_until:/.test(notes) && !/No check-in messages/i.test(tired), "a sleep report never pauses check-ins: one gym break is not a week off (#676)", `${notes} | ${tired.slice(0, 160)}`);
+  await pool.query("UPDATE users SET injuries = 'knee pain' WHERE phone_number = $1", [T]);
+  const before = await sleeps();
+  const knee = await say(T, "My knee is better and I slept 7 hours last night");
+  const inj = (await pool.query("SELECT injuries FROM users WHERE phone_number = $1", [T])).rows[0]?.injuries;
+  chk(inj === "none" && await sleeps() === before + 1, "\"my knee is better and I slept 7 hours\": the knee is cleared and the sleep is logged (#685 Codex review)", `${inj} | ${await sleeps()} sleep(s) | ${knee.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

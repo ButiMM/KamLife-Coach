@@ -148,19 +148,7 @@ export async function handleLifecycle(ctx: {
     return `I didn't catch that. Answer in one message, like: "Looser, High, Flatter, Great"\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall* — Great / Good / Okay / Bad`;
   }
 
-  // ---- INJURY BETTER — close the follow-up loop ----
-  // Guards: "no more pain meds/killers/relief" must NOT clear injuries (med management, not recovery).
-  // "pain is gone but back still hurts" must NOT clear injuries (partial, not full recovery).
-  const injuryBetter = !/\b(meds?|killers?|relief|pills?|tablets?|patches?)\b/i.test(m)
-    && !/\bstill\s+(?:hurts?|aching|sore|painful|bad)\b/i.test(m)
-    && /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
-  if (injuryBetter && user.injuries && user.injuries !== "none") {
-    const oldInjury = user.injuries;
-    await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
-    const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
-    await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
-    return injuryReply;
-  }
+  { const healed = await markInjuryRecovered(user, phone, message, m); if (healed) return healed; }
 
   { const slept = await logSleep(user, message, m); if (slept) return slept; }
 
@@ -1568,4 +1556,23 @@ export async function logSleep(user: any, message: string, m: string): Promise<s
     turnMutation(`INSERT sleep hours=${hours ?? "unstated"}${isBadSleep ? " bad_night" : ""}`); // the turn's record carries the write (#676)
     return sleepReply + trendLine;
   }
+}
+
+/**
+ * INJURY BETTER: close the follow-up loop. The front door's sleep path calls this too, so "my knee is better and
+ * I slept 7 hours" clears the injury as well as logging the sleep (#685 Codex review). Null when nothing changed.
+ */
+export async function markInjuryRecovered(user: any, phone: string, message: string, m: string): Promise<string | null> {
+  // Guards: "no more pain meds/killers/relief" must NOT clear injuries (med management, not recovery).
+  // "pain is gone but back still hurts" must NOT clear injuries (partial, not full recovery).
+  const injuryBetter = !/\b(meds?|killers?|relief|pills?|tablets?|patches?)\b/i.test(m)
+    && !/\bstill\s+(?:hurts?|aching|sore|painful|bad)\b/i.test(m)
+    && /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
+  if (!injuryBetter || !user.injuries || user.injuries === "none") return null;
+  const oldInjury = user.injuries;
+  await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
+  turnMutation(`UPDATE users.injuries ${oldInjury} -> none`);
+  const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
+  await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
+  return injuryReply;
 }
