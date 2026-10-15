@@ -616,13 +616,9 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
  * #592, THE INVERSION — the new coach is the front door. Behind the floors (safety, consent, onboarding,
  * billing, anything awaiting an answer) and the exact commands, every text message is read once
  * (understand: meaning, scope, facts, actions), its validated actions run through the existing tools
- * for every client, and the reply is composed from the record. Two model calls a turn. null = the
- * old doors answer: no reading, over the spend cap, or the model down. CORE_FRONT=off is the rollback
- * (expires 14 Oct; the doors it keeps reachable are deleted then, #568).
+ * for every client, and the reply is composed from the record. Two model calls a turn. null = no
+ * reading or the model down. No rollback since 14 Oct (#568); the doors such a turn still reaches go in batch 2.
  */
-export function coreFront(): boolean {
-  return String(process.env.CORE_FRONT || "on").toLowerCase() !== "off";
-}
 
 const frontReads = new Map<string, { message: string; u: Understanding | null }>();
 const EXACT_COMMANDS = new Set(["menu", "progress", "targets", "cancel", "stop", "start", "help", "workout", "today's workout",
@@ -661,7 +657,7 @@ export async function frontTurn(p: { phone: string; message: string; user: any; 
     await foldedFollowUp(phone, pre, reply).catch(() => {});
     return { reply, src: "core front", wrote: false };
   } catch (e) {
-    console.warn("[CORE_FRONT] the old doors answer:", (e as Error)?.message || e);
+    console.warn("[CORE_FRONT] unread, the doors below answer:", (e as Error)?.message || e);
     return null;
   } finally { frontReads.delete(phone); }
 }

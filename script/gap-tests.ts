@@ -54,8 +54,6 @@ const MESSY = await import("../server/understanding/messy-intake");
 const UNLOGGED = await import("../server/unlogged-notice");
 const UTILS = await import("../server/utils");
 const FOODID = await import("../server/food-identity-correction");
-const FIDELITY = await import("../server/normalizer-fidelity");
-const RECORDER = await import("./record-normalizer");
 const CARD = await import("../server/macro-card-attach");
 const NUTRI = await import("../server/nutrition-guardrails");
 const VERIF = await import("../server/brain/reply-verifier");
@@ -373,20 +371,6 @@ test("cut 1: the hand-stitched pair branches are gone", () => {
 // and the first handler ended the turn. Cut 1's own gate could not see this: routing-audit runs
 // with NORMALIZER=off, so the rewriter never executed in any test that proved Cut 1 worked.
 
-test("cut 2: the fact parse happens before the rewriter, not after", () => {
-  const src = readFileSync("server/routes.ts", "utf-8");
-  const parseAt = src.search(/(?:const|let) turnFacts = \w*\(?parseMessyIntake\(message\)/);
-  const rewriteAt = src.indexOf("message = canon;");
-  assert.ok(parseAt > -1 && rewriteAt > -1, "both sites must exist");
-  assert.ok(parseAt < rewriteAt,
-    "facts must be counted on the client's raw text — after `message = canon` they are counted on a rewrite");
-});
-
-test("cut 2: a multi-fact note is never rewritten at all", () => {
-  const src = readFileSync("server/routes.ts", "utf-8");
-  assert.ok(/if \(multiFact && canon\)/.test(src),
-    "a canonical is one command; a note of several facts cannot be spoken for by one");
-});
 
 test("cut 2: rewriting a mixed note down to one fact is what breaks the ledger", async () => {
   const { parseMessyIntake } = await import("../server/understanding/messy-intake");
@@ -662,41 +646,6 @@ test("REBUILD GATE journey 3: that wasn't a big mac is a drop, not a new meal", 
   assert.equal(parseDropLoggedItem("that wasn't a big mac"), "big mac");
 });
 
-
-test("fidelity: STEPS canonical cannot drop pap and chicken", () => {
-  const { normalizerFidelity } = FIDELITY;
-  const r = normalizerFidelity(
-    "Yesterday I walked eight thousand steps and I had chicken and pap.",
-    "i walked 8000 steps yesterday",
-  );
-  assert.equal(r.ok, false, r.reason);
-});
-
-test("fidelity: FOOD_LOG canonical cannot drop 8000 steps", () => {
-  const { normalizerFidelity } = FIDELITY;
-  const r = normalizerFidelity(
-    "Yesterday I had pap and chicken, and I walked 8,000 steps. I'm so exhausted.",
-    "i had pap and chicken yesterday",
-  );
-  assert.equal(r.ok, false, r.reason);
-});
-
-test("normalizer recorder: production credential precedence is shared and placeholders are refused", () => {
-  assert.equal(RECORDER.recorderCredential({
-    AI_INTEGRATIONS_OPENAI_API_KEY: "integration-key",
-    OPENAI_API_KEY: "fallback-key",
-  }), "integration-key");
-  assert.equal(RECORDER.recorderCredential({ OPENAI_API_KEY: "fallback-key" }), "fallback-key");
-  assert.equal(RECORDER.recorderCredential({ OPENAI_API_KEY: "sk-test-offline" }), null);
-});
-
-test("normalizer recorder: fail-soft model errors cannot become recordings", () => {
-  assert.equal(RECORDER.isModelErrorFallback({ intent: "OTHER", confidence: 0 }), true);
-  assert.equal(RECORDER.isModelErrorFallback({ intent: "OTHER", confidence: 0.95 }), false,
-    "a genuine high-confidence OTHER classification remains recordable");
-  assert.equal(RECORDER.isModelErrorFallback({ intent: "FOOD_LOG", confidence: 0, canonical: "i had pap" }), false,
-    "the guard is the exact fail-soft sentinel, not every low-confidence model answer");
-});
 
 // ============================================================
 // scalePortionDescription — portion label scaling
@@ -1949,8 +1898,6 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
 });
 
 
-
-
 // MEAL-REPEAT META-COMPLAINT GUARD (2026-07-10) — a voice complaint "I already told
 // you what's the plan for lunch. Have you forgotten? We are repeating the same things"
 // matched repeat+lunch and LOGGED YESTERDAY'S PASTA. Complaints must never log food.
@@ -2171,7 +2118,6 @@ test("media: sticker (image/webp, no caption) → sticker detection message, no 
 });
 
 // ============================================================
-
 
 
 // ============================================================
@@ -3610,16 +3556,6 @@ test("event boundaries: PRE-positioned phrasing is still unhandled — documente
 
 test("client truth: a pre-workout SNACK is not the pre-workout supplement", async () => {
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-// These were written as CommonJS require() inside an ESM module, so every test below
-// that used them threw "require is not defined" — they had never executed. Bound once here.
-const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
-const UTILS = await import("../server/utils");
-const FOODID = await import("../server/food-identity-correction");
-const FIDELITY = await import("../server/normalizer-fidelity");
-const CARD = await import("../server/macro-card-attach");
-const NUTRI = await import("../server/nutrition-guardrails");
-const VERIF = await import("../server/brain/reply-verifier");
   const names = (m: string) => scanForSAFoods(m).map(f => f.name);
   assert.deepEqual(names("I had a pre-workout snack"), [],
     "a snack before training must not log a scoop of powder");
@@ -3631,21 +3567,12 @@ const VERIF = await import("../server/brain/reply-verifier");
 
 test("client truth: a bare pre-workout mention IS still the supplement", async () => {
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-// These were written as CommonJS require() inside an ESM module, so every test below
-// that used them threw "require is not defined" — they had never executed. Bound once here.
-const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
-const UTILS = await import("../server/utils");
-const FOODID = await import("../server/food-identity-correction");
-const FIDELITY = await import("../server/normalizer-fidelity");
-const CARD = await import("../server/macro-card-attach");
-const NUTRI = await import("../server/nutrition-guardrails");
-const VERIF = await import("../server/brain/reply-verifier");
   // The fix must not delete a real capability: someone who actually took C4 still gets it.
   for (const m of ["I had my pre-workout", "took my pre workout and trained"]) {
     assert.ok(scanForSAFoods(m).some(f => /pre.?workout/i.test(f.name)), `"${m}" is the powder`);
   }
 });
+
 
 // ── PORTION UNITS: "2 spoons of pap" is not two plates of pap ────────────────────────────────
 // 2026-08-13, measured against the production matcher: "2 spoons of pap" logged 660 kcal — about
@@ -3691,16 +3618,6 @@ test("portion units: the FOOD decides — a handful of peanuts is one portion of
 test("portion units: END TO END — the hard South African cases", async () => {
   const { adjustFoodsForSegment } = await import("../server/portion-memory");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-// These were written as CommonJS require() inside an ESM module, so every test below
-// that used them threw "require is not defined" — they had never executed. Bound once here.
-const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
-const UTILS = await import("../server/utils");
-const FOODID = await import("../server/food-identity-correction");
-const FIDELITY = await import("../server/normalizer-fidelity");
-const CARD = await import("../server/macro-card-attach");
-const NUTRI = await import("../server/nutrition-guardrails");
-const VERIF = await import("../server/brain/reply-verifier");
   const kcal = (msg: string) => {
     const foods = scanForSAFoods(msg);
     return adjustFoodsForSegment(foods as any, msg).reduce((s: number, f: any) => s + f.adjustedCalories, 0);
@@ -3717,21 +3634,12 @@ const VERIF = await import("../server/brain/reply-verifier");
 test("portion units: an estimated quantity is tagged ai even when the FOOD is db", async () => {
   const { adjustFoodsForSegment } = await import("../server/portion-memory");
   const { scanForSAFoods } = await import("../server/handlers/food-scanner");
-// These were written as CommonJS require() inside an ESM module, so every test below
-// that used them threw "require is not defined" — they had never executed. Bound once here.
-const MESSY = await import("../server/understanding/messy-intake");
-const UNLOGGED = await import("../server/unlogged-notice");
-const UTILS = await import("../server/utils");
-const FOODID = await import("../server/food-identity-correction");
-const FIDELITY = await import("../server/normalizer-fidelity");
-const CARD = await import("../server/macro-card-attach");
-const NUTRI = await import("../server/nutrition-guardrails");
-const VERIF = await import("../server/brain/reply-verifier");
   const of = (msg: string) => adjustFoodsForSegment(scanForSAFoods(msg) as any, msg)[0] as any;
   assert.equal(of("2 spoons of pap").origin, "ai", "identity verified, quantity guessed");
   assert.equal(of("3 stashes of bread").origin, "ai", "an unknown unit is an estimate too");
   assert.equal(of("2 plates of pap").origin, undefined, "a stated full portion is not an estimate");
 });
+
 
 // ── FOOD PROVENANCE: where a calorie came from ──────────────────────────────────────────────
 // The adaptive loop turns on avgKcal7d, and until 2026-08-13 that number carried no provenance:
@@ -4676,23 +4584,16 @@ test("deploy identity does not depend on the app's own routing", () => {
   assert.equal(named.length, responses.length, "every one of them names the build");
 });
 
-test("deploy identity reports the effective engine and normalizer modes", async () => {
+test("deploy identity reports the effective engine mode", async () => {
   const { runningBuild } = await import("../server/routes/health");
   const previousEngine = process.env.ENGINE_LIVE;
-  const previousNormalizer = process.env.NORMALIZER;
   try {
     process.env.ENGINE_LIVE = "on";
-    process.env.NORMALIZER = "off";
-    assert.deepEqual(runningBuild().runtime, { engineLive: "on", normalizer: "off" },
-      "the health snapshot must expose the effective killswitch states, not merely the build");
-
+    assert.deepEqual(runningBuild().runtime, { engineLive: "on" }, "the health snapshot must expose the effective killswitch state, not merely the build");
     process.env.ENGINE_LIVE = "off";
-    delete process.env.NORMALIZER;
-    assert.deepEqual(runningBuild().runtime, { engineLive: "off", normalizer: "on" },
-      "the snapshot must report each owner's effective default state");
+    assert.deepEqual(runningBuild().runtime, { engineLive: "off" }, "…and its effective state when switched off");
   } finally {
     if (previousEngine === undefined) delete process.env.ENGINE_LIVE; else process.env.ENGINE_LIVE = previousEngine;
-    if (previousNormalizer === undefined) delete process.env.NORMALIZER; else process.env.NORMALIZER = previousNormalizer;
   }
 });
 
