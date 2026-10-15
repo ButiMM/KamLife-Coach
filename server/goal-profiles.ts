@@ -125,16 +125,16 @@ const WELLNESS_RE = /\b(health(?:y|ier)?|energy|energetic|tired|fatigue|wellness
 /** Did the client actually answer the goal question (a number 1–4 or any goal word)? */
 export function looksLikeGoalAnswer(msg: string): boolean {
   const lower = (msg || "").toLowerCase();
-  return /[1-4]/.test(msg) || BODY_COMP_RE.test(lower) || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower);
+  return /^\s*[1-4]\s*$/.test(msg) || BODY_COMP_RE.test(lower) || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower);
 }
 
 /** Map the goal answer to a canonical goal key. Existing 1/2/3 behaviour is unchanged. */
 export function classifyGoalFromText(msg: string): GoalKey {
-  const lower = (msg || "").toLowerCase();
-  if (msg.includes("2") || /\b(build|muscle|gain|bulk)\b/i.test(lower)) return "muscle_gain";
-  if (msg.includes("3") || /\b(recomp\w*|both)\b/i.test(lower)) return "recomposition";
+  const lower = (msg || "").toLowerCase(), pick = (msg || "").trim(); // a digit is a pick only on its own: "lose 20kg" is words (C1)
+  if (pick === "2" || /\b(build|muscle|gain|bulk)\b/i.test(lower)) return "muscle_gain";
+  if (pick === "3" || /\b(recomp\w*|both)\b/i.test(lower)) return "recomposition";
   // Health-led ONLY when there's no body-composition intent in the message.
-  if (!BODY_COMP_RE.test(lower) && (msg.includes("4") || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower))) {
+  if (!BODY_COMP_RE.test(lower) && (pick === "4" || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower))) {
     return CONDITION_RE.test(lower) ? "health_condition" : "general";
   }
   return "fat_loss";
