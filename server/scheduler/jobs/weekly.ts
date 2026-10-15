@@ -215,7 +215,11 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // The adaptive step goal is a TARGET CHANGE this job is offering, not a next move — it is
       // the client's call, one tap, and it stays. It does not compete with the decision below.
       if (stepAdj) lines.push(`👟 *Your steps:* ${stepAdj.reason}`);
-      if (totalScore >= 85) lines.push(``, `${name}, this is what results look like.`);
+      // THE WEEK IN THE COACH'S WORDS (B4): recognition from the card's own numbers; the canned line is the floor.
+      const words = await (await import("../../core/coach")).scheduledWords(client.phoneNumber, "weekly",
+        `this week's report card: showed up ${daysWithLogs}/7 days; training ${completedSessions}/${plannedSessions} sessions; steps ${stepsLine}; food logged ${foodDays}/7 days; protein near target on ${proteinDays} of ${foodDays} logged days${weightLine ? `; weight ${weightLine}` : ""}; score ${totalScore}/100`);
+      if (words) lines.push(``, words);
+      else if (totalScore >= 85) lines.push(``, `${name}, this is what results look like.`);
       else if (totalScore >= 60) lines.push(``, `Solid week, ${name}.`);
       else lines.push(``, `${name}, below your best but you are still here. That matters.`);
       if (move.line) lines.push(``, move.line);
