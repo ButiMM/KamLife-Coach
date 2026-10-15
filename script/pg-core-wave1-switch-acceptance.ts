@@ -43,6 +43,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^Supper was the same as lunch$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: true }]
       : /^Dinner was the same pap but with chicken instead of beef$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "same pap but with chicken instead of beef", meal: "dinner", needsConfirmation: false }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
@@ -209,6 +210,13 @@ REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
   const swapped = await say(T, "Dinner was the same pap but with chicken instead of beef");
   const last = (await pool.query("SELECT items FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY m.created_at DESC LIMIT 1", [T])).rows[0];
   chk(JSON.stringify(last?.items || []).toLowerCase().includes("chicken"), "\"the same pap but with chicken\" logs the chicken, not a copy of lunch (#677)", `${JSON.stringify(last?.items)} | ${swapped.slice(0, 120)}`);
+  // #686 review: a repeat parked for a "yes" is still copied once they say yes.
+  await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [T]);
+  await say(T, "I had pap and wors for lunch");
+  const parked = await say(T, "Supper was the same as lunch");
+  const yes = await say(T, "yes");
+  const after = (await pool.query("SELECT meal_label l, kcal_int k FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY logged_at", [T])).rows;
+  chk(after.length === 2 && after[1].l === "dinner" && after[1].k === after[0].k, "\"supper was the same as lunch\", then \"yes\": dinner is lunch's copy (#686 review)", `${JSON.stringify(after)} | ${parked.slice(0, 100)} | ${yes.slice(0, 100)}`);
   delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
