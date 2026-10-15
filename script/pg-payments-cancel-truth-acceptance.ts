@@ -337,6 +337,15 @@ chk(/\+?27820000974/.test(c3.founder) && admitsNotConfirmed(c3.founder),
     "a refund after an unconfirmed cancel is added to the task: \"cancel it by hand\" stays, and it stays urgent (#678)", JSON.stringify(both));
   await pool.query("DELETE FROM payment_events WHERE provider_payment_id = 'pf-lerato-678'");
   await pool.query("DELETE FROM admin_events WHERE target_phone = $1 AND action = 'refund_guarantee_owed'", [L.phone]);
+  // #687 review: outside the guarantee, "refund" sent twice. The second, identical request must not write over "cancel it by hand".
+  await pool.query("UPDATE payment_events SET processed_at = processed_at - interval '30 days' WHERE phone = $1", [L.phone]);
+  await (await import("../server/routes/payments")).handleRefundRequest(lu, L.phone);
+  await (await import("../server/routes/payments")).handleRefundRequest(lu, L.phone);
+  const [again] = (await pool.query("SELECT trigger_message t, priority p FROM escalations WHERE id = $1", [task?.id ?? 0])).rows;
+  chk(/PayFast did NOT confirm/.test(again?.t || "") && (again?.t.match(/Refund asked for/g) || []).length === 1 && again?.p === "urgent",
+    "\"refund\" sent twice: the task keeps \"cancel it by hand\", stays urgent, and the request is on it once (#687 review)", JSON.stringify(again));
+  await pool.query("DELETE FROM admin_events WHERE target_phone = $1 AND action IN ('refund_requested_outside_guarantee', 'refund_guarantee_owed')", [L.phone]);
+  await pool.query("UPDATE payment_events SET processed_at = processed_at + interval '30 days' WHERE phone = $1", [L.phone]);
   await pool.query("UPDATE escalations SET status = 'resolved', resolved_at = now() WHERE id = $1", [task?.id ?? 0]);
   chk(!/PayFast did NOT confirm/.test((await founderMorningInbox()) || ""), "…until it is resolved in the dashboard");
 }

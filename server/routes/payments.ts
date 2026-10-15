@@ -114,7 +114,7 @@ export async function handleRefundRequest(user: any, phone: string): Promise<str
       .where(and(eq(escalations.userId, user.id), eq(escalations.reason, "billing"), eq(escalations.status, "open"))).limit(1);
     const rank = (p?: string | null) => ["normal", "high", "urgent"].indexOf(p || "normal");
     const keep = open && rank(open.priority) > rank(priority) ? open.priority as typeof priority : priority;
-    const merged = open?.text && !open.text.includes(text) ? `${open.text}\n+ ${text}` : text;
+    const merged = !open?.text ? text : open.text.includes(text) ? open.text : `${open.text}\n+ ${text}`; // a repeated "refund" keeps the task as it is (#687 review)
     const fields = { triggerMessage: merged.slice(0, 1000), priority: keep, slaDeadline: escalationSLA(keep) };
     await (open ? db.update(escalations).set(fields).where(eq(escalations.id, open.id)) : db.insert(escalations).values({ userId: user.id, reason: "billing", ...fields }))
       .catch((e) => console.error("[REFUND] escalation write failed:", e));
