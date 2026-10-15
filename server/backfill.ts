@@ -115,6 +115,10 @@ export async function backfillAttributedDays(
     /\b(?:said|told)[^.!?]{0,100}\b(?:workout|session|training)\s+on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b[^.!?]{0,100}\b(?:missed|didn'?t|did\s+not|skipped)\b[^.!?]{0,100}\b(?:did|completed|trained)\b[^.!?]{0,50}\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i,
   );
   const correctionDays = new Set<string>();
+  // The move's two day words belong to the move. Beats resolve a bare weekday on their own clock (today's
+  // name is last week there; parseMealDate reads it as today), so on a Thursday the "Thursday" beat missed
+  // correctionDays and wrote a second session a week back. Skip those beats by their word, not their key.
+  const moveDayWords = new Set(workoutMove ? [workoutMove[1].toLowerCase(), workoutMove[2].toLowerCase()] : []);
   if (workoutMove) {
     const wrongDay = sastDayKey(parseMealDate(workoutMove[1]));
     const rightDay = sastDayKey(parseMealDate(workoutMove[2]));
@@ -161,7 +165,8 @@ export async function backfillAttributedDays(
     // WORKOUT — one row on the named day, and nothing about today. Idempotent per day.
     const beatEnd = beat.text.trim().toLowerCase();
     const danglingDayReference = ["workout on", "session on", "training on", "trained on"].some(s => beatEnd.endsWith(s));
-    if (!correctionDays.has(beat.dayKey) && !danglingDayReference && journeyMustKeepFacts(beat.text).workout) {
+    const partOfMove = moveDayWords.has(String(beat.dayReference || "").toLowerCase().trim());
+    if (!correctionDays.has(beat.dayKey) && !partOfMove && !danglingDayReference && journeyMustKeepFacts(beat.text).workout) {
       const existing = await db.select({ id: workoutLogs.id }).from(workoutLogs)
         .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, start), lt(workoutLogs.loggedAt, end)))
         .limit(1);
