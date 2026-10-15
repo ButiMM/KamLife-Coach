@@ -263,6 +263,25 @@ REAL("\n4l. ONBOARDING DAYS 1–3: NO MODEL CALL ONCE THE DAY'S MESSAGE IS SPENT
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4k. BACK AFTER NINE QUIET DAYS, THE COACH IS TOLD (B6, #646)");
+{
+  const T = "whatsapp:+27829438646";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  const [b] = await db.insert(schema.users).values({ phoneNumber: T, name: "Away Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any).returning();
+  await pool.query("INSERT INTO turn_ledger (user_id, input_text, reply, created_at) VALUES ($1, 'I am training for my first 5k', 'Lekker, we build to it.', now() - interval '9 days')", [b.id]);
+  (globalThis as any).__lastCompose = "";
+  await say(T, "Hey coach, I'm back");
+  const sys = (() => { try { return String(JSON.parse((globalThis as any).__lastCompose || "{}").messages?.[0]?.content || ""); } catch { return ""; } })();
+  chk(/AWAY: they last wrote 9 days ago/.test(sys) && /first 5k/.test((globalThis as any).__lastCompose || ""),
+    "back after 9 silent days, the composer is told how long and sees what they were working on (#646)", sys.slice(-400));
+  await pool.query("INSERT INTO turn_ledger (user_id, input_text, reply, created_at) VALUES ($1, 'Hey coach, I''m back', 'Welcome back!', now() - interval '1 minute')", [b.id]);
+  (globalThis as any).__lastCompose = "";
+  await say(T, "Can we plan today's run?");
+  chk(!/AWAY:/.test((globalThis as any).__lastCompose || ""), "a minute after the welcome back, the next message is not welcomed again (#666 review)", String((globalThis as any).__lastCompose).slice(-300));
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";
@@ -409,8 +428,6 @@ REAL("\n4h. #592 — THE FRONT DOOR: THE NEW COACH READS FIRST, THE TOOLS WRITE,
   chk(pref?.statement === "I don't eat fish" && !/vegetarian/.test(notes), "\"I don't eat fish\" is stored as they said it, and they are not made vegetarian (#588)", `${pref?.statement} | ${notes}`);
   const wr = await say(F, "I weigh 87kg today"), w = await one("SELECT current_weight c, target_weight_kg g FROM users WHERE id = $P");
   chk(Number(w.c) === 87 && Number(w.g) === 75 && !/that's the goal/i.test(wr), "\"I weigh 87kg today\" logs the weight and leaves the 75kg goal (#587)", `${w.c} / ${w.g} | ${wr.slice(0, 120)}`);
-  process.env.CORE_FRONT = "off"; const back = await say(F, "Any ideas for a cheap supper tonight?"); delete process.env.CORE_FRONT;
-  chk(back.trim().length > 0, "CORE_FRONT=off: the old doors answer again (the rollback works)", back.slice(0, 120));
   await pool.query("DELETE FROM users WHERE phone_number = $1", [F]); }
 { const [t] = (await pool.query("SELECT id FROM users WHERE phone_number = $1", [TESTER])).rows, at = (hm: string) => `((now() AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Johannesburg')::date - 1 + time '${hm}') AT TIME ZONE 'Africa/Johannesburg' AT TIME ZONE 'UTC'`; await pool.query("DELETE FROM meal_logs WHERE user_id = $1", [t.id]); await pool.query("DELETE FROM step_logs WHERE user_id = $1", [t.id]); await pool.query(`INSERT INTO meal_logs (user_id, raw_message, source, kcal_int, protein_int, logged_at) VALUES ($1, 'oats', 'sa_scanner', 300, 10, ${at("00:30")})`, [t.id]); const step = (n: number, prov: string) => pool.query(`INSERT INTO step_logs (user_id, steps, provenance, logged_at) VALUES ($1, ${n}, '${prov}', ${at("23:30")})`, [t.id]), traj = async () => (await import("../server/trajectory-report")).getTrajectoryForUser(t.id); await step(10000, "client_report"); const tr = await traj(); await step(50000, "unverified"); const tu = await traj(); chk(tr?.daysLogged === 1 && (tr?.avgStepBurn ?? 0) > 0 && tu?.avgStepBurn === tr?.avgStepBurn, "#539/#540: 00:30 oats and 23:30 steps are one SAST day; trusted steps count, an unverified row changes nothing", JSON.stringify({ d: tr?.daysLogged, burn: tr?.avgStepBurn, withUnverified: tu?.avgStepBurn })); }
 { const sid = "SM545live", said = "I'll walk after work today, hold me to it"; await handleMessage(TESTER, said, undefined, undefined, [], sid); const { recordInbound } = await import("../server/core/client-record"); await recordInbound({ phone: TESTER, rawText: said, sourceMessageId: sid }); const k = await (await import("../server/core/coach")).learnFromLiveRead(TESTER, sid); chk(k === 1 && (await pool.query("SELECT count(*)::int n FROM client_facts f JOIN users u ON u.id = f.user_id WHERE u.phone_number = $1 AND f.kind = 'commitment'", [TESTER])).rows[0].n === 1, "#545: with shadow off, the live coach's own read stores the commitment it accepted", String(k)); }

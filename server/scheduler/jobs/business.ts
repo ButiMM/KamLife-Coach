@@ -8,6 +8,19 @@ import {
   deliveryStats, todaySAST, thisWeekUTC, PRICING, inArray,
 } from "../shared";
 import { gptCosts } from "../../../shared/schema";
+import { sendProactive } from "../proactive-decision";
+import { deliveryAccepted } from "../../outbound-delivery";
+// A TARGET MOVES WITH ITS MESSAGE (#319, #671 review). Written first, so the message never names a number the record
+// lacks. The claim is the guarded send's own, taken after its holds (crisis, medication, life context), so a held run
+// does not spend the window. A message that was not delivered puts the old target back, unless something moved it since.
+async function announceTarget(client: Parameters<typeof sendProactive>[0], job: string, window: string,
+  overlay: "calorieTarget" | "stepsTarget", patch: Record<string, number>, before: Record<string, unknown>, body: string): Promise<boolean> {
+  await db.update(users).set(patch).where(eq(users.id, client.id));
+  const d = await sendProactive(client, { job, window }, body).catch(() => null);
+  if (d && deliveryAccepted(d)) return true;
+  await db.update(users).set(before as any).where(and(eq(users.id, client.id), eq(users[overlay], patch[overlay])));
+  return false;
+}
 export async function runSubscriptionExpiryCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
   const clients = await getActiveClients({ ignorePause: true }); // billing must run even when coaching is paused
@@ -353,14 +366,20 @@ export async function runAutoCalAdjust(): Promise<void> {
         }
 
         if (newCal !== null) {
-          // Claim before mutating targets + sending — DB-backed per 3-week window, restart-safe.
-          if (!(await claimProactive(client.id, "cal_adjust", `w${windowKey}`))) continue;
           // Baseline AND overlay. The baseline is what tomorrow's adaptation reasons from; the
           // overlay is the number this message quotes, so it must be true today too.
           const patch: any = { baselineCalorieTarget: newCal, calorieTarget: newCal };
-          if (newProt !== null) { patch.baselineProteinTarget = newProt; patch.proteinTarget = newProt; }
-          await db.update(users).set(patch).where(eq(users.id, client.id));
-          if (msg) await sendWhatsApp(client.phoneNumber, msg);
+          const before: any = { baselineCalorieTarget: client.baselineCalorieTarget ?? null, calorieTarget: client.calorieTarget ?? null };
+          if (newProt !== null) {
+            patch.baselineProteinTarget = newProt; patch.proteinTarget = newProt;
+            before.baselineProteinTarget = client.baselineProteinTarget ?? null; before.proteinTarget = client.proteinTarget ?? null;
+          }
+          if (msg) {
+            if (!(await announceTarget(client, "cal_adjust", `w${windowKey}`, "calorieTarget", patch, before, msg))) continue;
+          } else {
+            if (!(await claimProactive(client.id, "cal_adjust", `w${windowKey}`))) continue; // per 3-week window, restart-safe
+            await db.update(users).set(patch).where(eq(users.id, client.id));
+          }
           adjusted++;
         }
       } catch { /* skip individual client errors */ }
@@ -408,16 +427,16 @@ export async function runStepTargetAdaptation(): Promise<void> {
         const name    = (client.name || "").split(" ")[0] || "there";
 
         if (hitRate >= 0.8 && stepsTarget < 12000) {
-          if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.min(12000, stepsTarget + 1000);
-          await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`);
+          if (!(await announceTarget(client, "step_target_adapt", `w${windowKey}`, "stepsTarget", { baselineStepsTarget: newTarget, stepsTarget: newTarget },
+            { baselineStepsTarget: client.baselineStepsTarget ?? null, stepsTarget: client.stepsTarget ?? null },
+            `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`))) continue;
           bumped++;
         } else if (hitRate <= 0.3 && stepsTarget > 5000) {
-          if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.max(5000, stepsTarget - 1000);
-          await db.update(users).set({ baselineStepsTarget: newTarget, stepsTarget: newTarget }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`);
+          if (!(await announceTarget(client, "step_target_adapt", `w${windowKey}`, "stepsTarget", { baselineStepsTarget: newTarget, stepsTarget: newTarget },
+            { baselineStepsTarget: client.baselineStepsTarget ?? null, stepsTarget: client.stepsTarget ?? null },
+            `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`))) continue;
           reduced++;
         }
       } catch { /* skip individual */ }
