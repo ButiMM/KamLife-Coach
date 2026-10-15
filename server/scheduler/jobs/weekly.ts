@@ -216,7 +216,8 @@ export async function runSundayWeeklyReport(): Promise<void> {
       // the client's call, one tap, and it stays. It does not compete with the decision below.
       if (stepAdj) lines.push(`👟 *Your steps:* ${stepAdj.reason}`);
       // THE WEEK IN THE COACH'S WORDS (B4): recognition from the card's own numbers; the canned line is the floor.
-      const words = await (await import("../../core/coach")).scheduledWords(client.phoneNumber, "weekly",
+      // Only inside the 24-hour window: outside it the approved template goes instead and would drop these words (#669 review).
+      const words = await (await import("../../core/client-record")).inWhatsAppWindow(client.id) && await (await import("../../core/coach")).scheduledWords(client.phoneNumber, "weekly",
         `this week's report card: showed up ${daysWithLogs}/7 days; training ${completedSessions}/${plannedSessions} sessions; steps ${stepsLine}; food logged ${foodDays}/7 days; protein near target on ${proteinDays} of ${foodDays} logged days${weightLine ? `; weight ${weightLine}` : ""}; score ${totalScore}/100`);
       if (words) lines.push(``, words);
       else if (totalScore >= 85) lines.push(``, `${name}, this is what results look like.`);
