@@ -29,12 +29,12 @@ export function escalationSLA(priority: string): Date {
  * null = nothing to say.
  */
 export async function founderMorningInbox(now = new Date()): Promise<string | null> {
-  const [{ db }, { escalations, users }, { and, eq, lte, gte, lt, inArray, asc }] = await Promise.all([import("./db"), import("../shared/schema"), import("drizzle-orm")]);
+  const [{ db }, { escalations, users }, { and, eq, lte, gte, lt, inArray, asc, sql }] = await Promise.all([import("./db"), import("../shared/schema"), import("drizzle-orm")]);
   const overdue = await db.select({ userId: escalations.userId, reason: escalations.reason, priority: escalations.priority })
     .from(escalations).where(and(eq(escalations.status, "open"), lte(escalations.slaDeadline, now))).limit(20);
   const money = await db.select({ at: escalations.createdAt, text: escalations.triggerMessage })
     .from(escalations).where(and(eq(escalations.reason, "billing"), inArray(escalations.status, ["open", "claimed"])))
-    .orderBy(asc(escalations.createdAt)).limit(10);
+    .orderBy(sql`(${escalations.priority} = 'urgent') DESC`, asc(escalations.createdAt)).limit(10); // urgent first, never pushed off the list (#678)
   // RETENTION AT 14 AND 30 DAYS (D12): of the clients who joined in that week, how many wrote in their own
   // last week before day 14 / day 30, or later. Measured from each client's signup, not from today (Codex @ c448d26).
   const DAY = 86_400_000;
@@ -55,7 +55,7 @@ export async function founderMorningInbox(now = new Date()): Promise<string | nu
   }
   if (money.length) {
     const days = (at: Date | null) => at ? Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 86_400_000)) : 0;
-    parts.push(`💸 Money tasks open: ${money.length} (listed every morning until resolved)\n${money.map(t => `• ${days(t.at)}d — ${String(t.text || "billing task").slice(0, 160)}`).join("\n")}`);
+    parts.push(`💸 Money tasks open: ${money.length} (listed every morning until resolved)\n${money.map(t => `• ${days(t.at)}d — ${String(t.text || "billing task").slice(0, 400)}`).join("\n")}`);
   }
   if (d14.n || d30.n) parts.push(`📈 Still writing this week: day 14, ${d14.kept} of ${d14.n}; day 30, ${d30.kept} of ${d30.n} (of the clients who joined that week)`);
   return `${parts.join("\n\n")}\n\nOpen your dashboard inbox when you're up.`;
