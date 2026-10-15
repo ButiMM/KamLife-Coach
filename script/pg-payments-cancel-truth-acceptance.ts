@@ -327,6 +327,16 @@ chk(/\+?27820000974/.test(c3.founder) && admitsNotConfirmed(c3.founder),
   const inbox = await founderMorningInbox();
   chk(!!task && /Money tasks open/.test(inbox || "") && /• 3d — PayFast did NOT confirm/.test(inbox || ""),
     "an unconfirmed cancel is a founder task, listed every morning with its age (#572)", JSON.stringify(inbox));
+  // #678: they reply "refund" inside the guarantee. The refund is added to the task; "cancel it by hand" is not lost.
+  await pool.query("INSERT INTO payment_events (provider, provider_payment_id, phone, amount_gross, payment_status, raw_body) VALUES ('payfast', 'pf-lerato-678', $1, '199', 'COMPLETE', '{}')", [L.phone]);
+  const { users: U } = await import("../shared/schema"), { eq: EQ } = await import("drizzle-orm"), { db: DB } = await import("../server/db");
+  const [lu] = await DB.select().from(U).where(EQ(U.phoneNumber, L.phone));
+  await (await import("../server/routes/payments")).handleRefundRequest(lu, L.phone);
+  const [both] = (await pool.query("SELECT trigger_message t, priority p FROM escalations WHERE id = $1", [task?.id ?? 0])).rows;
+  chk(/PayFast did NOT confirm/.test(both?.t || "") && /refund OWED/i.test(both?.t || "") && both?.p === "urgent",
+    "a refund after an unconfirmed cancel is added to the task: \"cancel it by hand\" stays, and it stays urgent (#678)", JSON.stringify(both));
+  await pool.query("DELETE FROM payment_events WHERE provider_payment_id = 'pf-lerato-678'");
+  await pool.query("DELETE FROM admin_events WHERE target_phone = $1 AND action = 'refund_guarantee_owed'", [L.phone]);
   await pool.query("UPDATE escalations SET status = 'resolved', resolved_at = now() WHERE id = $1", [task?.id ?? 0]);
   chk(!/PayFast did NOT confirm/.test((await founderMorningInbox()) || ""), "…until it is resolved in the dashboard");
 }
