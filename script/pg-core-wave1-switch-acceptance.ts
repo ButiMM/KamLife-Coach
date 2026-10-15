@@ -42,6 +42,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^Lunch was rice not pap\. For supper I had chicken\.$/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "rice" }, { type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }]
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^Slept badly last night, taking a break from the gym today$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
@@ -181,6 +182,9 @@ REAL("\n4j. SLEEP THROUGH THE FRONT DOOR (A6)");
   const past = await say(T, "Had pap and wors for lunch yesterday and slept 5 hours last night");
   const meals = Number((await pool.query("SELECT COUNT(*)::int n FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1", [T])).rows[0].n);
   chk(meals === 2 && await sleeps() === 2, "yesterday's lunch with last night's sleep: the meal is written, only the sleep is dropped (#643 CTO attack)", `${meals} meal(s), ${await sleeps()} sleep(s) | ${past.slice(0, 160)}`);
+  const tired = await say(T, "Slept badly last night, taking a break from the gym today");
+  const notes = (await pool.query("SELECT profile_notes FROM users WHERE phone_number = $1", [T])).rows[0]?.profile_notes || "";
+  chk(!/paused_until:/.test(notes) && !/No check-in messages/i.test(tired), "a sleep report never pauses check-ins: one gym break is not a week off (#676)", `${notes} | ${tired.slice(0, 160)}`);
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
