@@ -207,6 +207,10 @@ REAL("\n4k. BACK AFTER NINE QUIET DAYS, THE COACH IS TOLD (B6, #646)");
   const sys = (() => { try { return String(JSON.parse((globalThis as any).__lastCompose || "{}").messages?.[0]?.content || ""); } catch { return ""; } })();
   chk(/AWAY: they last wrote 9 days ago/.test(sys) && /first 5k/.test((globalThis as any).__lastCompose || ""),
     "back after 9 silent days, the composer is told how long and sees what they were working on (#646)", sys.slice(-400));
+  await pool.query("INSERT INTO turn_ledger (user_id, input_text, reply, created_at) VALUES ($1, 'Hey coach, I''m back', 'Welcome back!', now() - interval '1 minute')", [b.id]);
+  (globalThis as any).__lastCompose = "";
+  await say(T, "Can we plan today's run?");
+  chk(!/AWAY:/.test((globalThis as any).__lastCompose || ""), "a minute after the welcome back, the next message is not welcomed again (#666 review)", String((globalThis as any).__lastCompose).slice(-300));
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 

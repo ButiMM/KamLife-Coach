@@ -122,7 +122,7 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
   // BACK AFTER A SILENCE (B6, #646): lastActiveAt is already this message's, so the gap is read from their last turn
   // before it, through reentry's own day count. The composer is told, so "hi" after nine days is a welcome back.
   const { daysSinceContact, RETURNING_DAYS } = await import("../understanding/reentry");
-  const lastTurn = turns.slice().reverse().find(t => t.input?.trim() && t.at && Date.now() - new Date(t.at).getTime() > 120_000);
+  const lastTurn = turns.slice().reverse().find(t => t.input?.trim() && t.at); // the ledger row is written after the reply: this message is never in it
   const gap = lastTurn ? daysSinceContact(lastTurn.at) : null;
   const away = gap !== null && gap >= RETURNING_DAYS
     ? `AWAY: they last wrote ${gap} days ago. Welcome them back by name, warmly, and name what they were last working on (from what they have told you or the conversation). No guilt, no catching up, no list of what they missed.`
