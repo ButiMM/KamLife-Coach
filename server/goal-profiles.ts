@@ -118,9 +118,11 @@ export const GOAL_KEYS = Object.keys(PROFILES) as GoalKey[];
 // "I just want energy / to be healthy / manage my sugar" is NOT funnelled into a fat-loss
 // deficit. Pure/tested. Body-composition intent always wins ("lose weight to be healthy"
 // stays fat_loss) so the three existing goals never change.
-const BODY_COMP_RE = /\b(lose|fat|muscle|build|recomp\w*|both|weight|gain|bulk|cut|tone|shred|lean out)\b/i;
+// "build" alone is not a body goal ("build healthier habits"); and since signup asks in words (C1), the SA-language
+// words for weight, losing it and muscle count too (isiZulu/isiXhosa, Sesotho/Setswana, Afrikaans).
+const BODY_COMP_RE = /\b(lose|fat|muscle|build(?:ing)?\s+(?:muscle|mass|size|strength)|recomp\w*|both|weight|gain|bulk|cut|tone|shred|lean out|isisindo|\w*nciphisa|\w*ehlisa|boima|fokotsa|theola|gewig|verloor|maer|imisipha|mesifa|spiere)\b/i;
 const CONDITION_RE = /\b(diabet\w*|sugar|blood pressure|\bbp\b|hypertension|cholesterol|pre.?diabet\w*|my condition)\b/i;
-const WELLNESS_RE = /\b(health(?:y|ier)?|energy|energetic|tired|fatigue|wellness|well.?being|feel better|stay (?:active|well|healthy|fit)|keep (?:active|fit|moving|healthy)|get fit|mobil\w*|longevity|grandkids|grandchildren|keep up|general fitness|overall)\b/i;
+const WELLNESS_RE = /\b(impilo|\w*phila|bophelo|boitekanelo|gesond\w*|health(?:y|ier)?|energy|energetic|tired|fatigue|wellness|well.?being|feel better|stay (?:active|well|healthy|fit)|keep (?:active|fit|moving|healthy)|get fit|mobil\w*|longevity|grandkids|grandchildren|keep up|general fitness|overall)\b/i;
 
 /** Did the client actually answer the goal question (a number 1–4 or any goal word)? */
 export function looksLikeGoalAnswer(msg: string): boolean {
@@ -131,7 +133,7 @@ export function looksLikeGoalAnswer(msg: string): boolean {
 /** Map the goal answer to a canonical goal key. Existing 1/2/3 behaviour is unchanged. */
 export function classifyGoalFromText(msg: string): GoalKey {
   const lower = (msg || "").toLowerCase(), pick = (msg || "").trim(); // a digit is a pick only on its own: "lose 20kg" is words (C1)
-  if (pick === "2" || /\b(build|muscle|gain|bulk)\b/i.test(lower)) return "muscle_gain";
+  if (pick === "2" || /\b(build(?:ing)?\s+(?:muscle|mass|size|strength)|muscle|gain|bulk|imisipha|mesifa|spiere)\b/i.test(lower)) return "muscle_gain";
   if (pick === "3" || /\b(recomp\w*|both)\b/i.test(lower)) return "recomposition";
   // Health-led ONLY when there's no body-composition intent in the message.
   if (!BODY_COMP_RE.test(lower) && (pick === "4" || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower))) {

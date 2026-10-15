@@ -180,6 +180,29 @@ const FLOW_D: Flow = {
   targetInputs: { weight: 90, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 34, heightCm: 180, exp: "beginner" },
 };
 
+// #667 review: answers in words that deny, and an answer in isiZulu.
+const FLOW_E: Flow = {
+  name: "Flow E — denials and isiZulu, in words",
+  phone: "whatsapp:+27000000105",
+  turns: [
+    { send: "hi", expectState: "ASK_POPIA" },
+    { send: "yes", expectState: "WELCOME" },
+    { send: "Thandi", expectState: "ASK_GENDER" },
+    { send: "female", expectState: "ASK_FEMALE_FOCUS" },
+    { send: "full body", expectState: "ASK_POSTPARTUM" },
+    { send: "I'm not pregnant, I gave birth two months ago", expectState: "ASK_AGE_NEW", expectReply: [/breastfeeding/i] },
+    { send: "29", expectState: "ASK_WEIGHT_HEIGHT" },
+    { send: "70kg, 1.65m", expectState: "ASK_GOAL" },
+    { send: "Ngifuna ukwehlisa isisindo", expectState: "ASK_MEDICAL" },
+    { send: "I don't have diabetes or high blood pressure", expectState: "ASK_INJURIES" },
+    { send: "none", expectState: "ASK_EQUIPMENT" },
+    { send: "gym", expectState: "ASK_GYM_SETUP" },
+    { send: "Full gym (machines)", expectState: "COMPLETE" },
+  ],
+  final: { name: "Thandi", gender: "female", lifeSituation: "postpartum_breastfeeding", goalType: "fat_loss", medicalConditions: "none" },
+  targetInputs: { weight: 70, goal: "fat_loss", situation: "postpartum_breastfeeding", days: 4, gender: "female", age: 29, heightCm: 165, exp: "beginner" },
+};
+
 let failures = 0;
 function fail(flow: string, what: string): void {
   failures++;
@@ -262,6 +285,7 @@ await runFlow(FLOW_A);
 await runFlow(FLOW_B);
 await runFlow(FLOW_C);
 await runFlow(FLOW_D);
+await runFlow(FLOW_E);
 
 // An unreported default may support provisional targets, but it is not a scale reading and must
 // never become either current truth or a weight event.

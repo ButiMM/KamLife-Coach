@@ -704,7 +704,8 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase().trim();
     // Pregnant — by the menu, in words, or already recorded by the safety guard on an earlier turn.
     // Recorded, a person flagged, and no weight-loss promise; the numbers stay withheld from here.
-    if (/^1\b/.test(lower) || /\bpregnan/.test(lower) || user.lifeSituation === "pregnant") {
+    // "I'm not pregnant, I gave birth two months ago" is the postpartum answer, not this one (#667 review).
+    if (/^1\b/.test(lower) || (/\bpregnan/.test(lower) && !/(?:\bnot|n['’]t|\bno longer|\bnever)\s+(?:\w+\s+){0,2}pregnan/.test(lower)) || user.lifeSituation === "pregnant") {
       await db.update(users).set({ lifeSituation: "pregnant", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
       if (user.lifeSituation !== "pregnant") await checkEscalation(user.id, "Said during onboarding: pregnant").catch(() => {});
       return user.lifeSituation === "pregnant" ? "How old are you?" : `${lifeContextReply({ context: "pregnancy", refer: true, demand: "pause" })}\n\nHow old are you?`;
@@ -1098,12 +1099,18 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase();
     const pick = /^[\d\s,&]+$/.test(msg.trim()) ? msg : ""; // "1, 3" from an old menu; "type 2 diabetes" is words (C1)
     const isNone = lower.includes("none") || lower.includes("nothing") || pick.includes("6") || pick.includes("8");
+    // SAID, NOT DENIED (#667 review): "I don't have diabetes or high blood pressure" names two conditions it denies. A word
+    // counts when no "no / not / don't / never / without" comes before it in its clause ("no diabetes, but my BP is high").
+    const said = (re: RegExp) => lower.split(/\bbut\b|[.;!?\n]/).some(c => {
+      const at = c.search(re);
+      return at >= 0 && !/\b(no|not|never|without|none)\b|n['’]t\b/.test(c.slice(0, at));
+    });
     const conditions: string[] = [];
-    if (pick.includes("1") || lower.includes("diab")) conditions.push("diabetes");
-    if (pick.includes("2") || lower.includes("blood pressure") || lower.includes("hypert")) conditions.push("hypertension");
-    if (pick.includes("3") || lower.includes("heart")) conditions.push("heart_condition");
-    if (pick.includes("4") || lower.includes("hiv") || lower.includes("arv")) conditions.push("hiv_arvs");
-    if (pick.includes("5") || lower.includes("pcos")) conditions.push("pcos");
+    if (pick.includes("1") || said(/diab/)) conditions.push("diabetes");
+    if (pick.includes("2") || said(/blood pressure|hypert/)) conditions.push("hypertension");
+    if (pick.includes("3") || said(/heart/)) conditions.push("heart_condition");
+    if (pick.includes("4") || said(/\bhiv\b|\barvs?\b/)) conditions.push("hiv_arvs");
+    if (pick.includes("5") || said(/pcos/)) conditions.push("pcos");
     const hasDiabetes = conditions.includes("diabetes");
     const hasHeart = conditions.includes("heart_condition");
     const hasHIV = conditions.includes("hiv_arvs");
