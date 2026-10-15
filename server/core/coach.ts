@@ -731,7 +731,10 @@ async function runActions(p: { phone: string; message: string; user: any; source
       && (await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when === "today";
     if (!sleepOk && !rest.length) return null;
     const logged = rest.length ? await logThroughExecutor(phone, message, rest, conf, p.sourceMessageId) : null; // "chicken for supper and I slept 5 hours"
-    const r = sleepOk ? await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false }) : null;
+    const life = await import("../handlers/lifecycle");
+    const healed = sleepOk ? await life.markInjuryRecovered(user, phone, message, m) : null; // "my knee is better and I slept 7 hours" (#685 review)
+    const slept = sleepOk ? await life.logSleep(user, message, m) : null; // sleep only, never the lifecycle doors (#676)
+    const r = [healed, slept].filter(Boolean).join("\n\n") || null;
     if (!logged) return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
     if (!logged.performed && !r) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
     const receipt = [(logged.card + logged.reply).trim(), r].filter(Boolean).join("\n\n");

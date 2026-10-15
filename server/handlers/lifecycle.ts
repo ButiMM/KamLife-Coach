@@ -19,7 +19,7 @@ import {
 import {
   buildDayWorkout, buildFullProgramme, getKamlifeProgramme,
 } from "../programme";
-import { withTimeout, logChat } from "./chat-log";
+import { withTimeout, logChat, turnMutation } from "./chat-log";
 import { setExplicitPause, clearPause } from "../health-state";
 import { goalStatusLine } from "../education";
 import { dailyMacroCardMarker } from "../macro-card-attach";
@@ -148,67 +148,9 @@ export async function handleLifecycle(ctx: {
     return `I didn't catch that. Answer in one message, like: "Looser, High, Flatter, Great"\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall* — Great / Good / Okay / Bad`;
   }
 
-  // ---- INJURY BETTER — close the follow-up loop ----
-  // Guards: "no more pain meds/killers/relief" must NOT clear injuries (med management, not recovery).
-  // "pain is gone but back still hurts" must NOT clear injuries (partial, not full recovery).
-  const injuryBetter = !/\b(meds?|killers?|relief|pills?|tablets?|patches?)\b/i.test(m)
-    && !/\bstill\s+(?:hurts?|aching|sore|painful|bad)\b/i.test(m)
-    && /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
-  if (injuryBetter && user.injuries && user.injuries !== "none") {
-    const oldInjury = user.injuries;
-    await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
-    const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
-    await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
-    return injuryReply;
-  }
+  { const healed = await markInjuryRecovered(user, phone, message, m); if (healed) return healed; }
 
-  // ---- SLEEP LOGGING — hardcoded + weekly trend, no GPT ----
-  // Catches: "slept 7 hours", "slaap 7 ure" (Afrikaans), "got about 6 hours",
-  // "only managed 5 hours last night", "bad night", "couldn't sleep" etc.
-  const hasSleepCtx = /\b(?:sleep|slept|sleeping|slaap|geslaap|nag|night|rest|tired|insomnia|woke)\b/i.test(m);
-  const sleepMatch = m.match(/\b(slept|sleep|sleeping|geslaap|slaap)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
-    || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
-    || (hasSleepCtx && m.match(/\b(?:got|managed|only\s+got|only\s+managed|got\s+about|got\s+around|got\s+maybe|just\s+got)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i))
-    || m.match(/\b(bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap)\b/i);
-
-  if (sleepMatch) {
-    // Prefer the ACTUAL figure after "only/just/managed/barely/maybe/got" over a number
-    // earlier in the sentence — "didn't sleep 8 hours, only got 5 hours" must log 5, not 8.
-    // The non-greedy sleepMatch otherwise grabs the first (negated) number.
-    const actualHoursMatch = m.match(/\b(?:only|just|managed|barely|maybe)\b[\s\w]{0,12}?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
-      || m.match(/\bgot\s+(?:about\s+|around\s+|roughly\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
-    const hoursStr = actualHoursMatch || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
-    const rawHours = hoursStr ? parseFloat(hoursStr[1]) : null;
-    if (rawHours !== null && (rawHours < 0.5 || rawHours > 16)) {
-      return `That doesn't look right — sleep hours should be between 1 and 16. Did you mean ${rawHours > 16 ? "minutes" : "hours"}? Try again: "I slept 7 hours".`;
-    }
-    const hours = rawHours;
-    const isBadSleep = /bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap/i.test(m);
-
-    const sleepReply = getSleepResponse(hours, isBadSleep);
-
-    // Weekly sleep trend — show 7-day average if they have enough logs
-    let trendLine = "";
-    try {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-      const recentSleepLogs = await db.select({ messageIn: chatHistory.messageIn }).from(chatHistory)
-        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
-      const sleepHours: number[] = [];
-      for (const log of recentSleepLogs) {
-        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
-        if (hMatch) sleepHours.push(parseFloat(hMatch[1]));
-      }
-      if (hours !== null) sleepHours.push(hours); // include today
-      if (sleepHours.length >= 3) {
-        const avg = sleepHours.reduce((a, b) => a + b, 0) / sleepHours.length;
-        const trend = avg >= 7 ? "✅ On track" : avg >= 6 ? "⚠️ Could improve" : "🔴 Needs work";
-        trendLine = `\n\n_7-day avg: ${avg.toFixed(1)} hrs (${sleepHours.length} logs) — ${trend}_`;
-      }
-    } catch { /* non-fatal */ }
-
-    await logChat(user.id, message, sleepReply, "SLEEP_LOG");
-    return sleepReply + trendLine;
-  }
+  { const slept = await logSleep(user, message, m); if (slept) return slept; }
 
   // ---- SLEEP REPORT — "my sleep" or "sleep report" ----
   if (m === "my sleep" || m === "sleep report" || m === "sleep stats" || /\b(sleep\s*report|sleep\s*history|how.?s?\s*my\s*sleep|sleep\s*trend)\b/i.test(m)) {
@@ -1557,4 +1499,80 @@ export async function handlePendingCancel(ctx: { phone: string; message: string;
     }
   }
   return null;
+}
+
+/**
+ * SLEEP, AND ONLY SLEEP (#676). The front door hands a sleep report here, never to handleLifecycle with the whole
+ * message: "Slept badly last night, taking a break from the gym today" reached the holiday branch and paused
+ * check-ins for a week. Null when there is no sleep figure or bad-night phrase to log.
+ */
+export async function logSleep(user: any, message: string, m: string): Promise<string | null> {
+  // ---- SLEEP LOGGING — hardcoded + weekly trend, no GPT ----
+  // Catches: "slept 7 hours", "slaap 7 ure" (Afrikaans), "got about 6 hours",
+  // "only managed 5 hours last night", "bad night", "couldn't sleep" etc.
+  const hasSleepCtx = /\b(?:sleep|slept|sleeping|slaap|geslaap|nag|night|rest|tired|insomnia|woke)\b/i.test(m);
+  const sleepMatch = m.match(/\b(slept|sleep|sleeping|geslaap|slaap)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
+    || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
+    || (hasSleepCtx && m.match(/\b(?:got|managed|only\s+got|only\s+managed|got\s+about|got\s+around|got\s+maybe|just\s+got)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i))
+    || m.match(/\b(bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap)\b/i);
+
+  if (!sleepMatch) return null;
+  {
+    // Prefer the ACTUAL figure after "only/just/managed/barely/maybe/got" over a number
+    // earlier in the sentence — "didn't sleep 8 hours, only got 5 hours" must log 5, not 8.
+    // The non-greedy sleepMatch otherwise grabs the first (negated) number.
+    const actualHoursMatch = m.match(/\b(?:only|just|managed|barely|maybe)\b[\s\w]{0,12}?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
+      || m.match(/\bgot\s+(?:about\s+|around\s+|roughly\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
+    const hoursStr = actualHoursMatch || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
+    const rawHours = hoursStr ? parseFloat(hoursStr[1]) : null;
+    if (rawHours !== null && (rawHours < 0.5 || rawHours > 16)) {
+      return `That doesn't look right — sleep hours should be between 1 and 16. Did you mean ${rawHours > 16 ? "minutes" : "hours"}? Try again: "I slept 7 hours".`;
+    }
+    const hours = rawHours;
+    const isBadSleep = /bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap/i.test(m);
+
+    const sleepReply = getSleepResponse(hours, isBadSleep);
+
+    // Weekly sleep trend — show 7-day average if they have enough logs
+    let trendLine = "";
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const recentSleepLogs = await db.select({ messageIn: chatHistory.messageIn }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+      const sleepHours: number[] = [];
+      for (const log of recentSleepLogs) {
+        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
+        if (hMatch) sleepHours.push(parseFloat(hMatch[1]));
+      }
+      if (hours !== null) sleepHours.push(hours); // include today
+      if (sleepHours.length >= 3) {
+        const avg = sleepHours.reduce((a, b) => a + b, 0) / sleepHours.length;
+        const trend = avg >= 7 ? "✅ On track" : avg >= 6 ? "⚠️ Could improve" : "🔴 Needs work";
+        trendLine = `\n\n_7-day avg: ${avg.toFixed(1)} hrs (${sleepHours.length} logs) — ${trend}_`;
+      }
+    } catch { /* non-fatal */ }
+
+    await logChat(user.id, message, sleepReply, "SLEEP_LOG");
+    turnMutation(`INSERT sleep hours=${hours ?? "unstated"}${isBadSleep ? " bad_night" : ""}`); // the turn's record carries the write (#676)
+    return sleepReply + trendLine;
+  }
+}
+
+/**
+ * INJURY BETTER: close the follow-up loop. The front door's sleep path calls this too, so "my knee is better and
+ * I slept 7 hours" clears the injury as well as logging the sleep (#685 Codex review). Null when nothing changed.
+ */
+export async function markInjuryRecovered(user: any, phone: string, message: string, m: string): Promise<string | null> {
+  // Guards: "no more pain meds/killers/relief" must NOT clear injuries (med management, not recovery).
+  // "pain is gone but back still hurts" must NOT clear injuries (partial, not full recovery).
+  const injuryBetter = !/\b(meds?|killers?|relief|pills?|tablets?|patches?)\b/i.test(m)
+    && !/\bstill\s+(?:hurts?|aching|sore|painful|bad)\b/i.test(m)
+    && /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
+  if (!injuryBetter || !user.injuries || user.injuries === "none") return null;
+  const oldInjury = user.injuries;
+  await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
+  turnMutation(`UPDATE users.injuries ${oldInjury} -> none`);
+  const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
+  await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
+  return injuryReply;
 }
