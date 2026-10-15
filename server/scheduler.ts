@@ -59,31 +59,10 @@ cron.schedule("0 22 * * *", async () => {
 // is genuinely something to chase, never over a single already-known item.
 cron.schedule("0 5 * * *", async () => {
   try {
-    const now = new Date();
-    const overdueEscalations = await db.select({
-      id: escalations.id, userId: escalations.userId,
-      reason: escalations.reason, priority: escalations.priority,
-      slaDeadline: escalations.slaDeadline,
-    }).from(escalations).where(
-      and(
-        eq(escalations.status, "open"),
-        lte(escalations.slaDeadline, now),
-      )
-    ).limit(20);
-    if (overdueEscalations.length > 0) {
-      const coachPhone = await resolveOpsAlertMsisdn();
-      if (coachPhone) {
-        const urgentCount = overdueEscalations.filter(e => e.priority === "urgent").length;
-        const highCount = overdueEscalations.filter(e => e.priority === "high").length;
-        const urgentDetails = overdueEscalations.filter(e => e.priority === "urgent").map(e => `• ${e.reason} (${e.userId.slice(0, 8)})`).join("\n");
-        const header = urgentCount > 0
-          ? `🚨 KamLife SLA BREACH — ${overdueEscalations.length} open escalation${overdueEscalations.length > 1 ? "s" : ""} past deadline`
-          : `📋 KamLife morning inbox — ${overdueEscalations.length} escalation${overdueEscalations.length > 1 ? "s" : ""} to clear`;
-        const body = urgentDetails ? `\n${urgentDetails}` : "";
-        const msg = `${header}\n\nUrgent: ${urgentCount} | High: ${highCount}${body}\n\nOpen your dashboard inbox when you're up.`;
-        await sendWhatsApp(`whatsapp:${coachPhone}`, msg).catch(e => console.error("[SLA ALERT]", e));
-      }
-    }
+    // Overdue escalations and, every morning until resolved, each open money task (#572).
+    const msg = await (await import("./safety-detection")).founderMorningInbox();
+    const coachPhone = msg ? await resolveOpsAlertMsisdn() : null;
+    if (msg && coachPhone) await sendWhatsApp(`whatsapp:${coachPhone}`, msg).catch(e => console.error("[SLA ALERT]", e));
   } catch (slaErr) { console.error("[SCHEDULER] SLA digest failed:", slaErr); }
   // TESTER TRUTH (CTO, 7 Oct): what testers received yesterday, to the founder with the morning inbox.
   await (await import("./audit/reply-audit-command")).sendTesterTruth().catch(e => console.error("[TESTER_TRUTH]", e?.message || e));

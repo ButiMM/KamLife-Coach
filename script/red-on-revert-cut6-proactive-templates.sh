@@ -89,13 +89,12 @@ s=s.replace("        const matched = windowTemplate && templateSid(windowTemplat
 assert s!=b and "const matched = false;" in s, "no match"; open(p,"w").write(s)
 PYEOF
 
-# 2. THE SUBSTITUTION IS CALLED A DELIVERY AGAIN. The generic check-in goes out and the caller is
-#    told the morning plan landed — so morning.ts opens a training loop against a message the
-#    client never read. This is the reporting half, isolated from the wiring half.
+# 2. THE GENERIC CHECK-IN GOES IN THE MESSAGE'S PLACE AGAIN (#327). With no template of its own, the
+#    client gets "Coach K checking in" instead of their morning plan. This is the wiring half of the old defect.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/scheduler/shared.ts"; s=open(p).read(); b=s
-s=s.replace('return templateDelivery === "dropped" ? "dropped" : "substituted";',
-            'return templateDelivery === "dropped" ? "dropped" : "fallback";')
+s=s.replace("        const matched = windowTemplate && templateSid(windowTemplate.name);",
+            '        windowTemplate = windowTemplate || { name: "kamlife_checking_in" }; const matched = templateSid(windowTemplate.name);')
 assert s!=b, "no match"; open(p,"w").write(s)
 PYEOF
 

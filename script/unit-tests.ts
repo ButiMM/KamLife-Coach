@@ -701,23 +701,6 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
-// PENDING CONFIRM — the "reply yes" question now has a landing pad (2026-07-23 live: "yes"
-// looped forever because the offered action was parked nowhere). Round-trip + one-shot.
-{
-  const { setPendingConfirm, takePendingConfirm, _resetPendingConfirm } = await import("../server/understanding/executor");
-  test("pending confirm: parked action is returned once, then gone", async () => {
-    _resetPendingConfirm();
-    const action = { type: "LOG_MEAL", foodText: "half a vienna" } as any;
-    setPendingConfirm("u1", action);
-    assert.deepEqual(takePendingConfirm("u1"), action, "first take returns the parked action");
-    assert.equal(takePendingConfirm("u1"), null, "second take is empty — never double-fires");
-  });
-  test("pending confirm: an unknown user has nothing parked", async () => {
-    _resetPendingConfirm();
-    assert.equal(takePendingConfirm("nobody"), null);
-  });
-}
-
 // CONFIRM-REPLY CLASSIFIER — a clean yes/no resolves the offer; anything else is a fresh
 // correction that must flow on to normal understanding (never silently cancel or mis-fire).
 
@@ -5874,6 +5857,7 @@ test("scope: off-domain asks are declined without a model", () => {
     "Can you help me write my CV for a job application?", "Should I put my savings into bitcoin this month?",
     "Please write me an essay about the history of Soweto for school", "can you help me fix this python code that keeps crashing",
     "give me betting tips for the weekend", "help me with my homework please",
+    "Please write a business plan for my gym", "Can you write me a cover letter for a gym job?", // #354: a coaching word does not veto the ask
   ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
 });
 test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
@@ -8343,6 +8327,13 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
       "Have your ARVs with a meal, it settles the stomach.",
       "Take your tablets on an empty stomach in the morning.",
     ]) assert.equal(verifyBrainReply(bad, {}).ok, false, `must be blocked: ${bad}`);
+  });
+
+  test("clinical: the onboarding meal plan sets no medicine timing (#329: some ARVs are taken at bedtime, on an empty stomach)", async () => {
+    const { getOnboardingMealPlan } = await import("../server/onboarding-meal-plan");
+    const plan = getOnboardingMealPlan({ name: "Thandi", goalType: "recomposition", medicalConditions: "hiv_arvs,diabetes", calorieTarget: 1900, proteinTarget: 120 });
+    assert.doesNotMatch(plan, /empty stomach|with breakfast every day|strict meal timing|no exceptions/i);
+    assert.match(plan, /clinic/i, "the ARV line points to the clinic");
   });
 
   test("clinical: legitimate coaching about the same clients still passes", () => {

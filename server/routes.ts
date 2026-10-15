@@ -34,7 +34,7 @@ import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { handleWeightLog } from "./handlers/weight";
 import { stripSignupSource } from "./signup-source";
-import { captureSignupSource } from "./signup-capture";
+import { captureSignupSource, captureReferral } from "./signup-capture";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout, inTurn, recordTurn, turnUser, turnMutation, turnMutations, turnAlreadyWrote, turnEvidence, turnCanonicalInput } from "./handlers/chat-log";
@@ -132,6 +132,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     user = await recordClientFacts(user, message, sourceMessageId);
   }
 
+  if (!user.referredBy && !mediaUrl && message) await captureReferral(user, phone, message); // C8: "Hi, I was referred by ABC1234"
   // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
   if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {
     message = stripSignupSource(message); turnCanonicalInput(message);

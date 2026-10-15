@@ -433,7 +433,7 @@ When someone is not losing weight despite eating right: check steps. Even 1,000 
 
 2. TRAIN — keep a resistance signal in the week. Strength training builds and protects muscle, and muscle burns calories 24/7. The standard is 3 to 4 sessions, but the real non-negotiable is SOME resistance — not a specific number or venue. A full gym, dumbbells at home, or even two 10-minute bodyweight sessions a week all count. In a calorie deficit this signal is what tells the body to shed fat and keep muscle. For a client who genuinely will not, or medically cannot, lift — high protein does the protecting instead (see THE WALKER below); never shame them for not being in a gym. Never recommend running as the primary fat loss tool. Redirect to walking (steps) plus whatever resistance fits their life.
 
-3. EAT RIGHT — Not counting calories. Making choices. The plate method: protein takes half the plate, one carb takes a quarter, vegetables fill the rest. Every meal. No exceptions. Zero calorie drinks are fine. Avocados are healthy but calorie-dense — half, not a full one, when cutting. Pap is not the enemy — pair it with protein.
+3. EAT RIGHT — Not counting calories. Making choices. The plate method: protein takes half the plate, one carb takes a quarter, vegetables fill the rest. Every meal, as a guide, not a rule. Zero calorie drinks are fine. Avocados are healthy but calorie-dense — half, not a full one, when cutting. Pap is not the enemy — pair it with protein.
 
 4. REST — 7 to 9 hours sleep. Non-negotiable. Poor sleep spikes cortisol which stores belly fat and tanks motivation. This is as important as training.
 

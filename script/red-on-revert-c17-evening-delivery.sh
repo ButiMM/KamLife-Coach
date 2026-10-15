@@ -72,30 +72,26 @@ if ! printf '%s\n' "$ctl" | grep -qE "^pg-evening-delivery-acceptance: GREEN"; t
 fi
 echo "CONTROL: untouched evening acceptance is GREEN"
 
-# 1. THE SUBSTITUTION IS FILED AS AN ORDINARY DELIVERY AGAIN — the defect itself. The client read
-#    the generic check-in; the ledger says the coach sent a proactive message, indistinguishable
-#    from one that landed. §3 must go red.
+# 1. THE GENERIC CHECK-IN GOES IN PLACE OF THE MESSAGE AGAIN (#327) — the defect itself. With no
+#    template of its own, the evening coaching is replaced by "Coach K checking in". §2 and §3 must go red.
 cat > "$PATCH_DIR/1.py" <<'PYEOF'
 p="server/scheduler/shared.ts"; s=open(p).read(); b=s
-s=s.replace('''      void logOutboundToHistory(to, logText, opts?.templateName === WINDOW_RECOVERY_TEMPLATE
-        ? "PROACTIVE_SUBSTITUTED" : "PROACTIVE"); // best-effort, non-blocking''',
-            '      void logOutboundToHistory(to, logText); // best-effort, non-blocking')
+s=s.replace('const matched = windowTemplate && templateSid(windowTemplate.name);',
+            'windowTemplate = windowTemplate || { name: "kamlife_checking_in" }; const matched = templateSid(windowTemplate.name);')
 assert s != b, "no match"; open(p, "w").write(s)
 PYEOF
 
-# 2. THE DISCRIMINATOR STOPS DISCRIMINATING — every template send is marked substituted, including
-#    a message whose OWN approved template carried the real content to the client. A lie in the
-#    opposite direction, and §4 is the only thing that catches it.
+# 2. A SEND THAT REACHED NOBODY IS REPORTED AS DELIVERED. Outside the window, with no template and no
+#    SMS, the caller must hear `dropped`, or it acts on coaching the client never read. §3 must go red.
 cat > "$PATCH_DIR/2.py" <<'PYEOF'
 p="server/scheduler/shared.ts"; s=open(p).read(); b=s
-s=s.replace('''opts?.templateName === WINDOW_RECOVERY_TEMPLATE
-        ? "PROACTIVE_SUBSTITUTED" : "PROACTIVE"''', '"PROACTIVE_SUBSTITUTED"')
+s=s.replace('      if (!smsLanded) return "dropped";\n      void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking\n      return "fallback";',
+            '      void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking\n      return "fallback";')
 assert s != b, "no match"; open(p, "w").write(s)
 PYEOF
 
-# 3. THE STORED BODY GOES BACK TO THE INTENDED ONE. The record would then say the coach delivered
-#    the coaching, in its own words, to a client who read "Coach K checking in" — and
-#    conversationHistory feeds that back to the model days later.
+# 3. THE STORED BODY GOES BACK TO THE INTENDED ONE. A template send must store what the client read
+#    (the rendered template), not the text it stood in for; §4 must go red.
 cat > "$PATCH_DIR/3.py" <<'PYEOF'
 p="server/scheduler/shared.ts"; s=open(p).read(); b=s
 s=s.replace('  const logText = rendered || opts?.fallbackText || `[template ${contentSid}]`;',
@@ -112,34 +108,13 @@ s=s.replace("      if (todayLogs.length === 0) {", "      if (todayLogs.length =
 assert s != b, "no match"; open(p, "w").write(s)
 PYEOF
 
-# 5. THE GENERIC CHECK-IN IS REPORTED AS A DELIVERY AGAIN (Cut 6's own seam, re-locked here
-#    because this cut now depends on it: the intent discriminator and the outcome must agree).
-cat > "$PATCH_DIR/5.py" <<'PYEOF'
-p="server/scheduler/shared.ts"; s=open(p).read(); b=s
-s=s.replace('return templateDelivery === "dropped" ? "dropped" : "substituted";',
-            'return templateDelivery === "dropped" ? "dropped" : "fallback";')
-assert s != b, "no match"; open(p, "w").write(s)
-PYEOF
-
-# 6. THE SNAPSHOT READER GOES BACK TO MATCHING `PROACTIVE` ALONE — the cost of the discriminator,
-#    paid in the one reader that filters on it (Codex P2 on 412614a). The substituted send becomes
-#    invisible to buildClientSnapshot, so the model is handed an OLDER message as "the last
-#    automated coach message": the client quotes back the check-in they actually read and the
-#    coach has no record of having sent it.
-cat > "$PATCH_DIR/6.py" <<'PYEOF'
-p = "server/brain/client-snapshot.ts"; s = open(p).read(); b = s
-s = s.replace('inArray(chatHistory.intent, ["PROACTIVE", "PROACTIVE_SUBSTITUTED"]),',
-              'eq(chatHistory.intent, "PROACTIVE"),')
-assert s != b, "no match"; open(p, "w").write(s)
-PYEOF
-
 echo "RED-ON-REVERT — C17 evening. Every case below must turn the acceptance red."
 failed=0
-for i in 1 2 3 4 5 6; do
+for i in 1 2 3 4; do
   if ! run_case "$i" "$PATCH_DIR/$i.py"; then failed=$((failed + 1)); fi
 done
 if [[ $failed -ne 0 ]]; then
   echo "red-on-revert-c17-evening-delivery: FAILED — $failed case(s) left it green, crashed, or would not patch."
   exit 1
 fi
-echo "red-on-revert-c17-evening-delivery: GREEN — 6/6 behavioral reverts caught"
+echo "red-on-revert-c17-evening-delivery: GREEN — 4/4 behavioral reverts caught"

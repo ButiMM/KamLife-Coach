@@ -581,7 +581,7 @@ _This is the biggest section for a reason — fill it properly._
 
 *Top right — PROTEIN (¼ plate):*
 Chicken · Fish · Pilchards · Eggs · Mince · Sugar beans
-_Same as lunch. Protein at every main meal — no exceptions._
+_Same as lunch. Protein at every main meal._
 
 *Bottom right — CARBS (¼ plate):*
 Pap · Sweet potato · Brown rice · Samp · Bread

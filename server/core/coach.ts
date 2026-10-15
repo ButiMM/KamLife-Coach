@@ -145,6 +145,7 @@ Ask one_question ONLY if the answer would change the advice.
 {"type":"REMOVE_LAST_MEAL"} · {"type":"SHOW_MEALS"} · {"type":"SHOW_WORKOUT"} · {"type":"SET_SICK","days":<n>} · {"type":"END_SICK"} · {"type":"SET_REMINDER","body":"<what>","when":"<as they said it>"}
 {"type":"CORRECT_MEAL","from":"<what the record wrongly holds, or empty>","to":"<what it really was, or empty>","meal":"<slot or omit>","retro":"<a past day or omit>"} for a meal ALREADY logged that they say was wrong (never also LOG_MEAL for it)
 {"type":"LOG_WORKOUT","what":"<the session in their words, or omit>","retro":"<a past day or omit>"} for a session they DID, never one planned, skipped or moved
+{"type":"LOG_SLEEP"} for sleep they report (hours slept, a bad night), never a question about sleep
 {"type":"SET_GOAL","goal":"fat_loss|muscle_gain|recomposition"} only when they ask to change their goal`;
 
 /** `actions` are what the new core WOULD do, validated by the existing permission gate (understanding/actions.ts).
@@ -281,7 +282,7 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
     // the model answered without the programme (founder's Monday plan, item 4).
     if (!exec.performed && !exec.confirmed && !exec.unwritten && !exec.skipped && !exec.error && exec.reply && READS.has(action.type)) out.reply = [out.reply, exec.reply].filter(Boolean).join("\n\n");
     if (exec.confirmed && !out.confirm) {
-      setPendingConfirm(user.id, action);
+      await setPendingConfirm(user.id, action);
       await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
       out.confirm = exec.reply;
     }
@@ -723,6 +724,22 @@ async function runActions(p: { phone: string; message: string; user: any; source
     const words = await afterLogReply(phone, message, receipt, logged.performed ? "food" : "workout", logged.user);
     return { reply: [words || receipt, logged.confirm || w?.ask].filter(Boolean).join("\n\n"), src: "core front: log + workout", wrote: true };
   }
+  const sleep = acts.find(a => a.type === "LOG_SLEEP");
+  if (sleep && acts.every(a => a === sleep || LOGS.has(a.type))) { // the sleep log reads the hours from their words and keeps the weekly trend (B5)
+    const conf = 1 - (u.uncertainty || 0), rest = acts.filter(a => a !== sleep);
+    // Unsure, or a past day (the sleep log has no date of its own; last night's sleep is today's): no sleep record (#643 review).
+    // Only the sleep is dropped: a meal said in the same message is still written.
+    const sleepOk = (await import("../understanding/actions")).shouldAutoExecute(sleep, conf)
+      && (await import("../sast")).statedWhen(message.replace(/\blast night\b/gi, "")).when === "today";
+    if (!sleepOk && !rest.length) return null;
+    const logged = rest.length ? await logThroughExecutor(phone, message, rest, conf, p.sourceMessageId) : null; // "chicken for supper and I slept 5 hours"
+    const r = sleepOk ? await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message, m, user, isQuestion: false }) : null;
+    if (!logged) return r ? { reply: r, src: "core front: sleep", wrote: true } : null;
+    if (!logged.performed && !r) return logged.confirm ? { reply: logged.confirm, src: "core front: confirm", wrote: false } : null;
+    const receipt = [(logged.card + logged.reply).trim(), r].filter(Boolean).join("\n\n");
+    const words = logged.performed ? await afterLogReply(phone, message, receipt, rest.some(a => a.type === "LOG_MEAL") ? "food" : "steps", logged.user) : null;
+    return { reply: [words || receipt, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: log + sleep", wrote: true };
+  }
   if (one?.type === "SET_GOAL") {
     const said = `change my goal to ${one.goal.replace("_", " ")}`;
     const r = await (await import("../handlers/lifecycle")).handleLifecycle({ phone, message: said, m: said, user, isQuestion: false });
@@ -754,7 +771,7 @@ async function runActions(p: { phone: string; message: string; user: any; source
       return { reply: [words || receipt, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: correction + log", wrote: true };
     }
   }
-  if (acts.some(a => ["CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL"].includes(a.type))) return null; // mixed with a words-owner: compose, never half-write
+  if (acts.some(a => ["CORRECT_MEAL", "LOG_WORKOUT", "SET_GOAL", "LOG_SLEEP"].includes(a.type))) return null; // mixed with a words-owner: compose, never half-write
   const confidence = 1 - (u.uncertainty || 0);
   const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);
   if (logged.confirm) return { reply: logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: confirm", wrote: false };
