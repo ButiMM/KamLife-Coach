@@ -5768,6 +5768,9 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "I lost money on crypto and can't afford the gym", "I need to update my CV so I skipped gym today",
     "Can you share some tips for sleep", "I bought stock cubes for the stew", "write me a workout plan for this week",
     "my doctor prescribed metformin, what should I eat?",
+    // #679: a letter or poem about their own training is coaching; a log in the same message reaches the coach.
+    "Write me a letter to my future self about why I'm losing weight", "Can you write me a poem to motivate me for my workout tomorrow",
+    "Can you write me a script for my gym routine?", "Please write my CV. Also I walked 8000 steps today and weighed 82kg",
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
 });
 test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
