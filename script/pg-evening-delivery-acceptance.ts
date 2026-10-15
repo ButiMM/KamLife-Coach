@@ -307,11 +307,28 @@ REAL("\n8. A SAFETY ROUTE OUTRANKS THE SCHEDULE (#571)");
   await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent) VALUES ($1, 'test crisis', 'test reply', 'CRISIS')", [user.id]);
   await runEveningAccountability();
   chk(freeformSent().length === 0 && templatesSent().length === 0, "after a crisis turn, the evening job sends nothing", JSON.stringify(freeformSent()));
+  // #319: the fortnightly step-target job is held too, and the target does not move without its message.
+  await pool.query("UPDATE users SET steps_target = 8000, baseline_steps_target = 8000 WHERE id = $1", [user.id]);
+  for (let d = 1; d <= 7; d++) await pool.query("INSERT INTO step_logs (user_id, steps, logged_at) VALUES ($1, 11000, now() - ($2 || ' days')::interval)", [user.id, String(d)]);
+  const { runStepTargetAdaptation } = await import("../server/scheduler/jobs/business");
+  await runStepTargetAdaptation();
+  const target = (await pool.query("SELECT steps_target t FROM users WHERE id = $1", [user.id])).rows[0]?.t;
+  chk(freeformSent().length === 0 && target === 8000, "after a crisis turn, no new step target is sent or set (#319)", `${target} | ${JSON.stringify(freeformSent())}`);
+  await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
   await reset();
   stubTwilio(false);
   await pool.query("UPDATE chat_history SET created_at = now() - interval '8 days' WHERE user_id = $1 AND intent = 'CRISIS'", [user.id]);
   await runEveningAccountability();
   chk(freeformSent().length === 1, "eight days later, the evening message goes again", JSON.stringify(freeformSent().length));
+  // #671 review: the held run did not spend the fortnight's window, so once the hold has passed the new target goes.
+  // A new day's one message (the evening above used today's); the step job's own window claim is left as it is.
+  await pool.query("DELETE FROM sent_proactive WHERE user_id = $1 AND message_key LIKE 'DAILY_CAP_%'", [user.id]);
+  dailyProactiveCount.clear(); _resetOutboundDedupe();
+  for (let d = 1; d <= 7; d++) await pool.query("INSERT INTO step_logs (user_id, steps, logged_at) VALUES ($1, 11000, now() - ($2 || ' days')::interval)", [user.id, String(d)]);
+  await (await import("../server/scheduler/jobs/business")).runStepTargetAdaptation();
+  const raised = (await pool.query("SELECT steps_target t FROM users WHERE id = $1", [user.id])).rows[0]?.t;
+  chk(raised === 9000 && freeformSent().some(b => /New target: \*9,000 steps\/day/.test(b)), "after the hold, the step target goes up with its message (#671 review)", `${raised} | ${JSON.stringify(freeformSent())}`);
+  await pool.query("DELETE FROM step_logs WHERE user_id = $1", [user.id]);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
