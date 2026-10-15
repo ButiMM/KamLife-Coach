@@ -120,6 +120,11 @@ export async function backfillAttributedDays(
     const rightDay = sastDayKey(parseMealDate(workoutMove[2]));
     correctionDays.add(wrongDay);
     correctionDays.add(rightDay);
+    // The splitter reads the same day words its own way (in a recap, a bare weekday that is today means last week),
+    // so its beats for the correction's two day words belong to the correction too: never a second session.
+    for (const b of attribution.beats) {
+      if (b.dayKey && [workoutMove[1], workoutMove[2]].some(d => d.toLowerCase() === String(b.dayReference || "").toLowerCase())) correctionDays.add(b.dayKey);
+    }
     const wrong = dayWindow(wrongDay);
     const right = dayWindow(rightDay);
     const removed = await db.delete(workoutLogs)
