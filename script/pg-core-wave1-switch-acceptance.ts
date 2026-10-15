@@ -43,6 +43,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^I slept (maybe )?5 hours (last night|2 days ago)$/i.test(msg) ? [{ type: "LOG_SLEEP" }]
       : /^Had pap and wors for lunch yesterday and slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and wors", meal: "lunch", retro: "yesterday", needsConfirmation: false }, { type: "LOG_SLEEP" }]
       : /^For supper I had chicken and I slept 5 hours last night$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "chicken", meal: "dinner", needsConfirmation: false }, { type: "LOG_SLEEP" }]
+      : /^Dinner was the same pap but with chicken instead of beef$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "same pap but with chicken instead of beef", meal: "dinner", needsConfirmation: false }]
       : /^(dinner was the same as lunch|should my dinner be the same as lunch\?)$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "the same as lunch", meal: "dinner", needsConfirmation: false }]
       : /^I'm sick with flu, need 3 days off$/i.test(msg) ? [{ type: "SET_SICK", days: 3 }]
       : /^I'm feeling better now$/i.test(msg) ? [{ type: "END_SICK" }]
@@ -202,6 +203,12 @@ REAL("\n4e. \"DINNER WAS THE SAME AS LUNCH\" COPIES LUNCH (#326)");
   const lunch = rows.find(r => r.l === "lunch"), dinner = rows.find(r => r.l === "dinner");
   chk(rows.length === 2 && !!dinner && dinner.k === lunch?.k && !/items a bit clearer/i.test(same),
     "\"dinner was the same as lunch\" logs dinner with lunch's calories, and never asks them to type the items", `${JSON.stringify(rows)} | ${same.slice(0, 120)}`);
+  // #677: a modified repeat is a new plate, not a copy: the chicken they swapped in is what is logged.
+  await pool.query("DELETE FROM meal_logs WHERE user_id = (SELECT id FROM users WHERE phone_number = $1)", [T]);
+  await say(T, "I had pap and beef stew for lunch");
+  const swapped = await say(T, "Dinner was the same pap but with chicken instead of beef");
+  const last = (await pool.query("SELECT items FROM meal_logs m JOIN users u ON u.id = m.user_id WHERE u.phone_number = $1 ORDER BY m.created_at DESC LIMIT 1", [T])).rows[0];
+  chk(JSON.stringify(last?.items || []).toLowerCase().includes("chicken"), "\"the same pap but with chicken\" logs the chicken, not a copy of lunch (#677)", `${JSON.stringify(last?.items)} | ${swapped.slice(0, 120)}`);
   delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
