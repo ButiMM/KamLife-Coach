@@ -1112,7 +1112,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
 // bumpVoiceFailure + clearVoiceFailure moved to handlers/media.ts
 
-async function checkRateLimit(phone: string): Promise<boolean> {
+export async function checkRateLimit(phone: string): Promise<boolean> {
   try {
     const result = await pool.query<{ hit_count: number }>(`
       INSERT INTO rate_limits (phone, window_start, hit_count)

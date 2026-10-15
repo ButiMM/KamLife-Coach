@@ -74,9 +74,8 @@ for (const key of ["start", "build", "postinstall", "deploy", "release"]) {
 // in the boot SQL or in any committed migration. Anything declared and creatable by neither is a
 // column production will be asked for and will not have.
 const schemaSrc = readFileSync("shared/schema.ts", "utf-8");
-const bootSrc = readFileSync("server/index.ts", "utf-8");
 const migrationSql = migrations.map(f => readFileSync(`migrations/${f}`, "utf-8")).join("\n");
-const creatable = `${bootSrc}\n${migrationSql}`;
+const creatable = migrationSql; // migrations alone: the boot SQL is gone (#343)
 const declared = [...schemaSrc.matchAll(/\b(?:text|integer|boolean|timestamp|numeric|jsonb|serial|uuid|real|date|varchar)\s*\(\s*"([a-z0-9_]+)"/g)]
   .map(m => m[1]);
 const uncreatable = [...new Set(declared)].filter(col => !creatable.includes(col));
