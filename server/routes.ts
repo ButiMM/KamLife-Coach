@@ -519,7 +519,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   if (feedbackReply !== null && mayEndTurn("workout-feedback")) return closeCoachingTurn(feedbackReply); if (feedbackReply !== null) commitFact(turn, "workout", feedbackReply);
   // #592 THE FRONT DOOR: past the floors and anything awaiting an answer, the new coach reads, acts through the tools, and answers.
   // No rollback since 14 Oct (#568). A turn it could not read still reaches the doors below until they are deleted (batch 2).
-  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m)
+  // MONEY IS A FLOOR, NOT A READ: "I'm cancelling my subscription" / "stop charging me" goes to the cancel and billing
+  // flow below, never to the coach's words (the coach has no cancel action, so a cancel in a sentence cancelled nothing).
+  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m) && !looksLikeBillingOrCancel(m)
     ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
   if (front?.reply && front.wrote) turnEvidence({ conversationalOnly: true }); // #590: an after-log turn is the new coach's words only; the ladder speaks once a day, scheduled
   if (front?.reply) return tag(front.reply, front.src);
