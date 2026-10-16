@@ -63,7 +63,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
       : /^change my goal to muscle gain$/i.test(msg) ? [{ type: "SET_GOAL", goal: "muscle_gain" }] : null;
     const fix = log586 ? log586 : front ? front : /not pap/i.test(msg) ? [{ type: "CORRECT_MEAL", from: "pap", to: "burger" }] : /vitamins/i.test(msg) ? [bag, { type: "SET_REMINDER", body: "take my vitamins", when: "tomorrow at 8am" }] : /nudge me/i.test(msg) ? [bag] : [];
     content = /garbled/i.test(msg) ? "not json" : JSON.stringify({ scope: /homework/i.test(msg) ? "out" : "in", family: fix.length ? "correction" : "question", wants: "advice", one_question: null, ...(/not sure/i.test(msg) ? {} : { uncertainty: /maybe/i.test(msg) ? 0.99 : 0.2 }), facts: /^I don't eat fish$/i.test(msg) ? [{ kind: "preference", subject: "no fish", statement: "I don't eat fish", detail: {} }] : /hold me to it/i.test(msg) ? [{ kind: "commitment", subject: "walk", statement: "hold me to it", detail: { domain: "movement", what: "a walk after work", due: new Date(Date.now() + 7_200_000).toISOString().slice(0, 10) } }] : [], actions: fix });
-  } else if (body.includes("this is your scheduled onboarding message")) { content = "Take a 20-minute walk today. How did yesterday go?"; (globalThis as any).__lastCompose = body; }
+  } else if (body.includes("this is your scheduled weekly message")) { content = "Three food days in a row, Week Tester: that is the habit forming. NEW-WEEKLY"; (globalThis as any).__lastCompose = body; ((globalThis as any).__weekly ||= []).push(body); }
+  else if (body.includes("this is your scheduled onboarding message")) { content = "Take a 20-minute walk today. How did yesterday go?"; (globalThis as any).__lastCompose = body; }
   else if (body.includes("You are Coach K, a warm, direct South African")) { content = `Try pap with beans tonight. ${NEW}`; (globalThis as any).__lastCompose = body; }
   else if (body.includes("domain gate")) content = /homework/i.test(body) ? "NO" : "YES";
   else if (body.includes("message-understanding brain")) content = `{"intent":"OTHER","confidence":0.5,"canonical":""}`;
@@ -268,6 +269,28 @@ REAL("\n4i. \"REMOVE MY LAST MEAL\" AFTER A CORRECTION REMOVES THE LAST ONE SENT
   } finally { await c.query("ROLLBACK"); c.release(); }
   delete process.env.CORE_WAVE2;
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
+REAL("\n4m. SUNDAY'S REPORT CARD ENDS IN THE COACH'S WORDS, FROM ITS OWN NUMBERS (B4)");
+{
+  // Two clients with the same week: one wrote an hour ago (inside WhatsApp's 24-hour window), one has not written.
+  const add = async (T: string, name: string) => {
+    await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+    const [w] = await db.insert(schema.users).values({ phoneNumber: T, name, onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+      subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120, createdAt: new Date(Date.now() - 20 * 86_400_000) } as any).returning();
+    for (const d of [1, 2, 3]) await pool.query("INSERT INTO chat_history (user_id, message_in, message_out, intent, created_at) VALUES ($1, 'pap and chicken', 'Logged', 'FOOD_LOG', now() - ($2 || ' days')::interval)", [w.id, String(d)]);
+    return w;
+  };
+  const inside = await add("whatsapp:+27829438664", "Week Tester"), outside = await add("whatsapp:+27829438669", "Quiet Tester");
+  await pool.query("INSERT INTO client_events (user_id, raw_text, received_at) VALUES ($1, 'hi', now() - interval '1 hour')", [inside.id]);
+  const paused = process.env.PROACTIVE_PAUSED || ""; process.env.PROACTIVE_PAUSED = "false";
+  (globalThis as any).__weekly = [];
+  await (await import("../server/scheduler/jobs/weekly")).runSundayWeeklyReport();
+  process.env.PROACTIVE_PAUSED = paused;
+  const composed: string[] = (globalThis as any).__weekly;
+  chk(composed.some(b => /No message from Week/.test(b) && /showed up 3\/7 days/.test(b)), "Sunday's card: the coach is told the card's own numbers before it speaks (B4)", composed.map(b => b.slice(-200)).join(" || "));
+  chk(!composed.some(b => /No message from Quiet/.test(b)), "outside the 24-hour window no words are composed: the template that goes would drop them (#669 review)");
+  await pool.query("DELETE FROM users WHERE phone_number IN ($1, $2)", [inside.phoneNumber, outside.phoneNumber]);
 }
 
 REAL("\n4l. ONBOARDING DAYS 1–3: NO MODEL CALL ONCE THE DAY'S MESSAGE IS SPENT, AND NO MOVE PICKED BY THE MODEL (#665 review)");
