@@ -4,46 +4,38 @@
  */
 
 import { db } from "../db";
-import { assessWeightRate } from "./weight";
 import {
-  users, weightLogs, workoutLogs, stepLogs, chatHistory,
+  users, workoutLogs, stepLogs, chatHistory,
   bodyMeasurements, clothingCheckins,
 } from "../../shared/schema";
-import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
-import { SUPPLEMENT_GUIDE } from "../constants";
+import { eq, desc, and, gte } from "drizzle-orm";
 import { shareAchievement } from "../achievement-card";
 import { achievementCardMarker } from "../macro-card-attach";
 import { computeFoodLogStreak } from "./food-scanner";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExerciseDemoFormCue } from "../exercise-media";
 import { matchVariantGuideRequest, formatVariantGuide } from "../exercise-variants";
 import {
-  buildDayWorkout, buildFullProgramme,
-  getKamlifeProgramme, getDayType, getPhaseNames,
+  buildDayWorkout, getKamlifeProgramme, getPhaseNames,
 } from "../programme";
 import { buildWorkoutViewerUrl } from "../workout-viewer";
 import { buildDailyDirection } from "../daily-direction";
 import { oneActionCommand } from "./one-action-command";
 import { getTodayWorkoutState } from "../workout-state";
 import { getOnboardingMealPlan } from "../onboarding";
-import { askCoachK } from "../gpt";
-import { withTimeout, logChat } from "./chat-log";
-import { calculateTargets, waterTargetLitres, bmiOf } from "../targets";
+import { logChat } from "./chat-log";
+import { waterTargetLitres, bmiOf } from "../targets";
 import { JUNK_WORDS } from "./checks";
 import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { addFact } from "../memory";
-import { sendWhatsApp } from "../scheduler";
 import { sastDayStart, classifyPainReport , getDisplayName} from "../utils";
 import { looksLikeDirectionRequest } from "../daily-direction";
-import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 import { turnEvidence } from "./chat-log";
-import { readHeldConstraints, foodDayClosedWith } from "../held-constraints";
-import { foodConstraints, allowedAlternatives, allowedProteinStaples } from "../food-swaps";
-import { getDayLedger, getProgressTruth, sessionsThisCalendarWeek, getWeightTruth } from "../day-ledger";
+import { foodConstraints, allowedProteinStaples } from "../food-swaps";
+import { getProgressTruth, getWeightTruth } from "../day-ledger";
 import { daysOnProgramme } from "../day-ledger-core";
 import { currentDateAnswer, isCurrentDateQuestion } from "../understanding/current-date";
-import { engineLive } from "../understanding/live";
 import { PRICING, GUARANTEE_PHRASE } from "../../shared/pricing";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -101,61 +93,6 @@ export async function handleMiscCommands(ctx: {
     return await oneActionCommand(user, { atKeyboard: true, asksAboutToday: true });
   }
 
-  // Distance to goal is a progress-truth question, not the daily-direction card.
-  // "How far am I from my goal???" must not fall through to GPT or to the plan menu.
-  if (/\bhow far (?:am i|are we) (?:from|to) (?:my |the |our )?(?:goal|target|dream)\b/i.test(m)
-      || /\bhow far from (?:my |the )?(?:goal|target)\b/i.test(m)) {
-    try {
-      const seed = user.programmeStartDate || user.createdAt;
-      const daysOn = seed
-        ? Math.max(1, Math.floor((Date.now() - new Date(seed).getTime()) / 86_400_000))
-        : 1;
-      const truth = await getProgressTruth(user, { days: daysOn + 1, clientMessage: message });
-      const weekN = await sessionsThisCalendarWeek(user.id).catch(() => 0);
-      const want = Number(user.trainingDaysPerWeek) || 0;
-      const name = getDisplayName(user) || "there";
-      const bits: string[] = [];
-      const change = truth.weight.changeKg;
-      const scaleOff = /\b(weight|scale|weigh)\b/i.test(String(user.doNotMention || ""));
-      // THE DISTANCE FIRST — it is the question (2026-08-27, live phone trace).
-      //
-      // This block already ended on "That's the distance" and never contained one: it recited the
-      // change since start, the week's sessions and today's protein, and left a client holding
-      // 92kg with an 85kg target no closer to knowing they had 7kg to go. The gap now comes from
-      // getWeightTruth, the one reader that owns what the scale says, so this mouth and every
-      // other surface cannot disagree about it.
-      //
-      // It leads, and the recital still follows: they asked how far, and the rest is the context
-      // that makes the number mean something. When there is no target or no weigh-in there is no
-      // distance to state, and the answer is exactly what it was before.
-      const toGoal = truth.weight.toGoalKg;
-      if (!scaleOff && toGoal !== null && truth.weight.currentKg !== null) {
-        const kg = Math.abs(toGoal);
-        bits.push(kg < 0.1
-          ? `You're at your goal weight — ${truth.weight.currentKg}kg.`
-          : `${kg.toFixed(1)}kg to ${toGoal < 0 ? "go" : "gain"}: ${truth.weight.currentKg}kg now, ${Number(user.targetWeightKg)}kg the goal.`);
-      }
-      if (!scaleOff && truth.weight.known && change !== null) {
-        bits.push(change < 0
-          ? `Scale: down ${Math.abs(change).toFixed(1)}kg since you started.`
-          : change > 0
-            ? `Scale: up ${change.toFixed(1)}kg since you started.`
-            : `Scale: unchanged since you started.`);
-      } else if (!scaleOff && truth.weight.currentKg) {
-        bits.push(`Scale: ${truth.weight.currentKg}kg — not enough weigh-ins for a trend.`);
-      } else if (!scaleOff) {
-        bits.push("I don't have a trend I can stand behind. Hop on the scale and I'll give you a straight read.");
-      }
-      if (want) bits.push(`This week: ${weekN}/${want} sessions.`);
-      if (truth.today.protein || user.proteinTarget) {
-        bits.push(`Today's protein: ${truth.today.protein}g / ${user.proteinTarget || "—"}g.`);
-      }
-      const reply = `${name} — ${bits.join(" ")}\n\nThat's the distance. The next move is still one thing.`;
-      await logChat(user.id, message, reply, "GOAL_DISTANCE");
-      return reply;
-    } catch (e) { console.error("[GOAL_DISTANCE]", e); }
-  }
-
   if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
     return buildDailyDirection(user, ws as any);
@@ -200,8 +137,6 @@ export async function handleMiscCommands(ctx: {
 
   // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): supplement questions ("should I take creatine?") are answered by core/coach.ts. Logging a dose stays in food-commands.
 
-  // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
-
   // ---- PAIN TRIAGE — soreness vs. real injury (2026-07-12, Kam: "catch whether it's just
   // sensitivity from a workout or a real injury"). The old handler fired the full STOP-72-HOURS
   // protocol on ANY pain mention, and over-reacting to normal DOMS kills momentum. Now: clear
@@ -244,18 +179,6 @@ export async function handleMiscCommands(ctx: {
     const injuryReply = `Stop loading ${injuredArea} immediately. Rest it today. Ice for 15 minutes if swollen.\n\nIf the pain is severe, sharp, or does not settle within 48 hours — see a doctor or physio. Do not train through sharp pain.\n\nYou CAN still train ${safe}. One body part stops, the rest keeps going — I've noted it, so your sessions train *around* it from now on.\n\nRest ${injuredArea} for 72 hours minimum then reassess. Update me when you are back.\n\n[BUTTONS:Today's workout|Log food]`;
     await logChat(user.id, message, injuryReply, "INJURY");
     return injuryReply;
-  }
-
-  // ---- Period / cycle awareness ----
-  if (
-    /\b(my period|on my period|period started|period week|period cramps?|period pains?|menstrual|menstruation|time of (the )?month|that time of month|pms|pmdd|luteal phase|follicular phase|ovulation|ovulating|my cycle|my hormones|hormones (are|going|messing)|cycle week|cycle day)\b/i.test(m)
-    || /\b(bloating|cramps?|spotting)\b/i.test(m) && /\b(period|cycle|hormones?|monthly)\b/i.test(m)
-    || m === "my period" || m === "period" || m === "pms"
-  ) {
-    const cycleContext = `Client mentioned their menstrual cycle or period. Ask which phase they are in using EXACTLY these options: "Just started (Day 1–5)", "Middle of cycle (Day 6–14)", "PMS week (Day 15–21)", or "Period week (Day 22–28)". Then based on their reply: Phase 1 (period) — lighter training is fine, walking counts, iron-rich foods essential (red meat, spinach, pilchards), no guilt for lower energy. Phase 2 (follicular) — best training week, peak strength, push harder, carbs support performance. Phase 3 (PMS) — reduce intensity slightly, higher protein reduces cravings, magnesium from dark leafy greens helps mood. Phase 4 (period) — same as Phase 1. Normalise all of it. Weight fluctuates 1–3kg from water retention before period — not fat. Do not panic. Coach the next meal or session, not the feelings. SA voice. Max 3 sentences unless giving phase-specific advice.`;
-    const cycleReply = await withTimeout("gpt_cycle", 20000, () => askCoachK(message, user, cycleContext));
-    await logChat(user.id, message, cycleReply, "CYCLE");
-    return cycleReply;
   }
 
   // WAVE 1 IS THE NEW COACH'S (#445, CTO order on #391): "what should I eat" / "hungry" is answered by core/coach.ts, not here.
@@ -700,9 +623,6 @@ export async function handleMiscCommands(ctx: {
     } catch (e) { console.error("[STATS]", e); }
   }
 
-  // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
-  // A directional assessment, not a wall of numbers. Gated to the engine when live.
-
   /*
    * WEEKLY PROGRESS CARD — REMOVED (2026-08-20, progress convergence follow-up).
    *
@@ -1129,9 +1049,6 @@ export async function handleMiscCommands(ctx: {
     return shareCard;
   }
 
-  // ---- MEAL TIMING COACH — "when should I eat", "pre workout meal", "post workout" ----
-  // Conversational nutrition question (kcal-heavy template) — engine owns it when live.
-
   // ---- WEEKLY FOOD AUDIT — "food audit", "eating audit", "diet check" ----
   if (m === "food audit" || m === "diet check" || m === "eating audit" || m === "audit" || /\b(food\s*audit|diet\s*check|eating\s*audit|week.?s?\s*eating|how.?s?\s*my\s*diet|diet\s*review)\b/i.test(m)) {
     try {
@@ -1262,57 +1179,6 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- MOOD / STRESS CHECK-IN — "stressed", "mood", "how am I feeling" ----
-  if (m === "mood" || m === "stress" || m === "stressed" || m === "anxious" || m === "feeling down" || m === "mental health" || /\b(stress|mood|anxious|anxiety|depressed|burnt?\s*out|overwhelm|mental\s*health|feeling\s*down|feeling\s*low|not\s*coping)\b/i.test(m)) {
-    // Check if they are logging a mood score
-    const moodScore = m.match(/\b(mood|stress|feeling)\b.*?(\d)\s*(?:out of|\/)\s*(?:5|10)/i) || m.match(/\b(mood|stress)\s*(\d)\b/i);
-    if (moodScore) {
-      const score = parseInt(moodScore[2]);
-      await logChat(user.id, message, `Mood: ${score}`, "MOOD_LOG");
-      const reply = score <= 3
-        ? `Mood ${score} — noted. On hard days, a 15-minute walk outside does more for your brain than any motivational quote. Move your body even if training feels impossible today. Small action beats no action.`
-        : score <= 6
-          ? `Mood ${score} — middle ground. Your body and mind are connected. A good training session or even a walk will shift this upward. What can you do in the next 30 minutes?`
-          : `Mood ${score} — strong. Channel that energy into today's session. Good headspace = good training = good results. Let's go.`;
-      return reply;
-    }
-
-    return null; // the engine owns this — its own guards keep the SADAG net
-  }
-
-
-  // ---- EXERCISE SUBSTITUTION ENGINE — "can't do X", "alternative to X" ----
-  if (/\b(can.?t\s+do|cannot\s+do|alternative\s+(?:to|for)|replace\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row)|instead\s+of\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row))\b/i.test(m)) {
-    const exerciseSubs: Record<string, { why: string; home: string[]; gym: string[] }> = {
-      squat: { why: "knee, hip, or back issue", home: ["Wall sit (30-60 seconds)", "Glute bridge (3×15)", "Step-ups on chair (3×10 each leg)", "Sumo squat (wider stance, less knee pressure)"], gym: ["Leg press (less spine load)", "Goblet squat (lighter, controlled)", "Smith machine squat (guided path)", "Hack squat"] },
-      deadlift: { why: "lower back concern", home: ["Hip hinge with water bottles (3×12)", "Single-leg Romanian deadlift (3×10)", "Glute bridge (3×15)", "Bird dog (3×10 each)"], gym: ["Trap bar deadlift (neutral spine)", "Romanian deadlift (lighter, controlled)", "Cable pull-through", "Hip thrust (barbell or machine)"] },
-      bench: { why: "shoulder or chest strain", home: ["Push-ups (knees if needed, 3×12)", "Floor press with water bottles (3×12)", "Wall push-ups (3×15)", "Resistance band chest press"], gym: ["Dumbbell bench (better shoulder position)", "Incline dumbbell press", "Cable chest fly", "Machine chest press"] },
-      "pull-up": { why: "not strong enough yet or shoulder issue", home: ["Doorframe row with towel (3×10)", "Resistance band pull-apart (3×15)", "Inverted row under table (3×8)", "Superman hold (3×20 seconds)"], gym: ["Lat pulldown (build strength first)", "Assisted pull-up machine", "Cable row", "Band-assisted pull-ups"] },
-      "push-up": { why: "wrist, shoulder, or strength limitation", home: ["Wall push-ups (3×15)", "Knee push-ups (3×12)", "Incline push-ups on chair (3×10)", "Plank hold (3×30 seconds)"], gym: ["Machine chest press", "Dumbbell bench press", "Cable chest press", "Smith machine push-up"] },
-      lunge: { why: "knee or balance issue", home: ["Split squat (stationary, 3×10)", "Step-ups (3×10 each)", "Wall sit (3×30 seconds)", "Glute bridge (3×15)"], gym: ["Leg press (single leg)", "Bulgarian split squat (bench support)", "Step-ups with dumbbells", "Leg extension + leg curl combo"] },
-      "overhead press": { why: "shoulder impingement or pain", home: ["Lateral raise with bottles (3×12)", "Front raise (3×10)", "Wall slide (3×12)", "Resistance band press (45° angle)"], gym: ["Landmine press (shoulder-friendly angle)", "Cable lateral raise", "Machine shoulder press (guided path)", "Incline dumbbell press (30°)"] },
-    };
-
-    const exerciseNames = Object.keys(exerciseSubs);
-    const matchedExercise = exerciseNames.find(ex => m.includes(ex) || m.includes(ex.replace("-", " ")) || m.includes(ex.replace("-", "")));
-    const mode = user.trainingMode || "home";
-    const name = user.name?.split(" ")[0] || "";
-
-    if (matchedExercise) {
-      const sub = exerciseSubs[matchedExercise];
-      const alternatives = mode === "gym" ? sub.gym : sub.home;
-      const reply = `*🔄 ${matchedExercise.charAt(0).toUpperCase() + matchedExercise.slice(1)} Alternatives${name ? ` — ${name}` : ""}*\n\n` +
-        `Common reason: ${sub.why}\n\n` +
-        `*${mode === "gym" ? "Gym" : "Home"} alternatives:*\n${alternatives.map((a, i) => `${i + 1}. ${a}`).join("\n")}\n\n` +
-        `Pick one and work it into your programme. Same muscles, different movement. Reply *done* after your session.`;
-      await logChat(user.id, message, reply, "EXERCISE_SUB");
-      return reply;
-    }
-
-    // Generic substitution advice
-    const reply = `Tell me which exercise you cannot do and I will give you alternatives.\n\nExamples:\n• "can't do squats" (knee issue)\n• "alternative to deadlift" (back concern)\n• "can't do pull-ups" (not strong enough yet)\n• "instead of bench press" (shoulder pain)\n\nI have alternatives for every exercise — ${mode === "gym" ? "gym" : "home"} options based on your setup.`;
-    return reply;
-  }
 
   // ---- EXERCISE VARIANTS GUIDE — "show me shoulder press", "types of leg press", "row options" ---- A GENERIC movement name ("shoulder press") means "which machine is this and how
   // do I use it" — clients without a trainer ask this constantly. Show the menu of real-world variants with how-to-spot-each. A SPECIFIC variant ("machine shoulder press") or an explicit
@@ -1383,32 +1249,6 @@ export async function handleMiscCommands(ctx: {
       await logChat(user.id, message, caption, "PORTION_IMAGE");
       return plateReply;
     }
-  }
-
-  // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
-  if (!wroteThisTurn && (m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|plate\s*size|hand\s*portion)\b/i.test(m))
-    && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg)\b/i.test(m)) {
-    const goal = user.goalType || "fat_loss";
-    const name = user.name?.split(" ")[0] || "";
-    const portionGuide = `*✋ Portion Size Guide${name ? ` — ${name}` : ""}*\n_Use your hand — works everywhere, no scale needed_\n\n` +
-      `*Protein* (palm size = ~25-30g protein):\n` +
-      `👋 ${goal === "muscle_gain" ? "2 palms per meal (men), 1.5 palms (women)" : "1 palm per meal (women), 1.5 palms (men)"}\n` +
-      `That is: 1 chicken breast, 150g mince, 2 eggs + pilchards, 200g fish\n\n` +
-      `*Carbs* (cupped hand = ~25-30g carbs):\n` +
-      `🤲 ${goal === "fat_loss" ? "1 cupped hand per meal" : "2 cupped hands per meal"}\n` +
-      `That is: 1 scoop pap, 1 scoop rice, 1 slice bread, 1 small sweet potato\n\n` +
-      `*Vegetables* (fist size):\n` +
-      `✊ 2 fists per meal — fill half your plate\n` +
-      `That is: big portion spinach, cabbage, broccoli, salad, tomatoes\n\n` +
-      `*Fats* (thumb size = ~7-10g fat):\n` +
-      `👍 ${goal === "fat_loss" ? "1 thumb per meal" : "2 thumbs per meal"}\n` +
-      `That is: 1 tsp oil, 1 tbsp peanut butter, small handful nuts\n\n` +
-      `*The Plate Rule:*\n` +
-      `Half vegetables | Quarter protein | Quarter carbs\n` +
-      `This works at any braai, restaurant, or family dinner. No counting needed.`;
-
-    await logChat(user.id, message, portionGuide, "PORTION_GUIDE");
-    return portionGuide;
   }
 
   // ---- WEIGHT TREND CHART — "weight chart", "weight graph", "weight trend" ----
@@ -1484,9 +1324,6 @@ export async function handleMiscCommands(ctx: {
       return `Could not generate weight chart. Try again later.`;
     }
   }
-
-  // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----
-  // Conversational advisory template (no data write) — engine owns it when live.
 
   return null;
 }
