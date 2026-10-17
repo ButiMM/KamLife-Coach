@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # Architecture Bet — model-as-brain, code-as-guardrail
 
 _Scoping + recommendation. Written 2026-07-05. Decision owner: Kam._

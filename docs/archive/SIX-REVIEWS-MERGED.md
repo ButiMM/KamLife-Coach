@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # Six reviews, merged — what we take, what we don't
 
 **Written 30 July 2026.** Every claim below is checked against the code in this repository, not

@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — Comprehensive Overview
 ### The AI accountability partner that helps ordinary South Africans finally stay consistent with their health
 _Prepared for third-party review · 2026-07-14_

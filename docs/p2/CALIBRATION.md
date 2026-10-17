@@ -98,7 +98,7 @@ selected turns are plumbing and are excluded from the rubric — but retained as
 sequence on 08-06: he complained about a broken reply and the recovery attempt made it worse.
 
 Turn 24 also puts a raw phone number in front of the member, which belongs with the logging
-findings in `docs/BACKLOG.md`.
+findings in `docs/archive/BACKLOG.md`.
 
 ## 5. Coverage
 

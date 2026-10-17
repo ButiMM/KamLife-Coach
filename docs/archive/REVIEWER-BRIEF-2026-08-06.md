@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — Reviewer Brief, 6 August 2026
 
 Written for outside reviewers. Everything here is measured from the code and the test

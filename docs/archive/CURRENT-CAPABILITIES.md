@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — Current Capabilities (Auditable)
 
 **Date:** 2026-07-16 · **Rule:** if a claim can't be verified by a test, an

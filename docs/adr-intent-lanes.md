@@ -1,7 +1,7 @@
 # ADR: Keyword-presence routing → intent lanes
 
 **Status:** accepted — Stage 1 shipped 2026-07-14. Stages 2–3 gated behind the
-stabilization contract (docs/stabilization-contract.md).
+stabilization contract (docs/archive/stabilization-contract.md).
 
 ## The problem (in the founder's words)
 
