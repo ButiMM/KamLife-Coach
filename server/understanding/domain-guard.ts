@@ -94,7 +94,11 @@ export function offDomainRedirect(message: string, ongoing = false): string | nu
   const t = (message || "").replace(/[\u2018\u2019]/g, "'");
   // "I had to update my CV so I skipped gym" is a life event, not an ask: coaching words win. But a request
   // that OPENS by asking for the artefact ("Please write a business plan for my gym") is declined whatever it names (#354).
-  if (OFF_DOMAIN_ASK_RE.test(t) && (/^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:write|draft|create|make|do)\s+(?:me\s+|us\s+)?(?:an?\s+|my\s+|the\s+)?(?:essay|poem|song|story|speech|assignment|business plan|cv|cover letter|motivation letter|email|letter|code|script)\b/i.test(t) || !isObviouslyInDomain(t))) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
+  // A message that also reports a log goes to the coach: it declines the artefact and still writes the steps (#679).
+  if (/\b\d[\d,.]*\s*(?:k\b|kg|kgs|steps|km|litres?)|\bi\s+(?:had|ate|walked|ran|trained|weighed)\b/i.test(t)) return null;
+  // Hard artefacts are declined whatever they name; a letter, poem, story, speech or script about their training,
+  // weight or motivation is coaching ("write me a letter to my future self about why I'm losing weight", #679).
+  if (OFF_DOMAIN_ASK_RE.test(t) && (/^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:write|draft|create|make|do)\s+(?:me\s+|us\s+)?(?:an?\s+|my\s+|the\s+)?(?:essay|assignment|business plan|cv|cover letter|motivation letter|email|code)\b/i.test(t) || !isObviouslyInDomain(t))) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
   return null;
 }
 

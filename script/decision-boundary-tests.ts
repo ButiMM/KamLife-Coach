@@ -95,7 +95,7 @@ assert.equal(detectMedicationContext("Can I increase the dose of my insulin?").r
 // #353 (Codex on #345): a medicine choice asked auxiliary-first is a prescription ask too; training on one is not.
 for (const ask of ["Can I take an antibiotic for my sore throat?", "Should I use painkillers for this headache?"])
   assert.equal(detectMedicationContext(ask).reason, "choosing", ask);
-for (const ok of ["Can I still train while on antibiotics?", "My doctor prescribed metformin, what should I eat?"])
+for (const ok of ["Can I still train while on antibiotics?", "My doctor prescribed metformin, what should I eat?", "Can I use a medicine ball for my core workout?" /* equipment, #679 */])
   assert.equal(detectMedicationContext(ok).unsafeRequest, false, ok);
 const stopping = detectMedicationContext("Should I stop Mounjaro?");
 assert.equal(stopping.unsafeRequest, true);

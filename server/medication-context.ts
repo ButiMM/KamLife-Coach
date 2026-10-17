@@ -11,7 +11,7 @@ const GLP1_RE = /\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|lir
 const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?)\b/i;
 
 export function detectMedicationContext(message: string): MedicationContextDecision {
-  const m = String(message || "").toLowerCase();
+  const m = String(message || "").toLowerCase().replace(/\bmedicine\s+balls?\b/g, "med-ball"); // equipment, not a medicine (#679)
   const glp1 = GLP1_RE.test(m);
   const present = glp1 || MED_RE.test(m);
   if (!present) return { present: false, medicationClass: null, unsafeRequest: false, reason: null };
