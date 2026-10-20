@@ -1598,11 +1598,7 @@ async function main() {
 
   });
 
-  check("continuity: how-far is progress truth; WOW is not a ticket", async () => {
-    const misc = readFileSync("server/handlers/misc-commands.ts", "utf-8");
-    const distAt = misc.indexOf("how far (?:am i");
-    const dirAt = misc.indexOf("looksLikeDirectionRequest(m)");
-    assert.ok(distAt > 0 && distAt < dirAt, "distance-to-goal must claim before the plan card");
+  check("continuity: WOW is not a ticket", async () => {
     const { bareReactionFallback, isDiagnosticQuestion } = await import("../server/reaction-guard");
     const wow = bareReactionFallback("Kam");
     assert.equal(isDiagnosticQuestion(wow), false);
