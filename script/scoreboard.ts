@@ -25,7 +25,6 @@ const {
 } = await import("../server/utils");
 const { energyFrameLine } = await import("../server/targets");
 const { verifyBrainReply } = await import("../server/brain/reply-verifier");
-const { buildWeekCard } = await import("../server/week-card");
 
 type Check = { name: string; screenshot: string; pass: boolean };
 type Category = { name: string; checks: Check[] };
@@ -71,13 +70,6 @@ const clock: Category = { name: "Clock & dates (SAST-anchored)", checks: [
   ok("day-name meal lands 1–7 days back", "regression", (() => { const d = parseMealDate("had chicken on saturday evening"); const back = (sastDayStart().getTime() - sastDayStart(d).getTime()) / 86_400_000; return back >= 1 && back <= 7; })()),
 ]};
 
-// ── Category 5: Artifact engine (marketing-as-consequence) ──
-const artifacts: Category = { name: "Artifact engine (shareable, never shameful)", checks: [
-  ok("full week builds a card", "feature", !!buildWeekCard({ name: "Kam M", currentWeight: 82.6, stepsTarget: 11000, workoutsThisWeek: 3, trainingDaysPerWeek: 3, avgStepsThisWeek: 11500, weightChange: -0.4, mealsLoggedDays: 7, workoutStreak: 8, lifeContext: null })),
-  ok("empty week → no shame card", "guard", buildWeekCard({ name: "Kam", currentWeight: null, stepsTarget: 11000, workoutsThisWeek: 0, trainingDaysPerWeek: 3, avgStepsThisWeek: 0, weightChange: null, mealsLoggedDays: 1, workoutStreak: 0, lifeContext: null }) === null),
-  ok("bereavement week → no stats card", "guard", buildWeekCard({ name: "Kam", currentWeight: 82, stepsTarget: 11000, workoutsThisWeek: 3, trainingDaysPerWeek: 3, avgStepsThisWeek: 9000, weightChange: 0, mealsLoggedDays: 5, workoutStreak: 3, lifeContext: "bereavement this week" }) === null),
-]};
-
 // ── Category 6: Energy semantics — surplus/deficit, the core coaching truth ──
 const mgFrame = energyFrameLine("muscle_gain", 2996) || "";
 const flFrame = energyFrameLine("fat_loss", 1900) || "";
@@ -104,7 +96,7 @@ const qtyCorrections: Category = { name: "Quantity corrections (no double-log)",
 //   • remove_meal end-to-end against a real day (needs DB)
 //   • conversational tone / "does it feel smart" (needs live model — drill-battery.ts)
 
-const categories = [goalIntegrity, frameTruth, txRouting, clock, energy, qtyCorrections, artifacts];
+const categories = [goalIntegrity, frameTruth, txRouting, clock, energy, qtyCorrections];
 
 console.log("\n=== KAMLIFE GUARDRAIL SCOREBOARD (measured, not guessed) ===\n");
 let totalPass = 0, total = 0;

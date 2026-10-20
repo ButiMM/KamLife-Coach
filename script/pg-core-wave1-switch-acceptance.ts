@@ -23,6 +23,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: any, init?: any) => {
   const url = typeof input === "string" ? input : String(input?.url || input);
   if (!url.includes("api.openai.com")) return realFetch(input, init);
+  if ((globalThis as any).__modelDown) return new Response("upstream down", { status: 503 });
   const body = typeof init?.body === "string" ? init.body : "";
   let content = "Old coach here, noted.";
   if (body.includes("say what they want from this turn")) {
@@ -354,6 +355,21 @@ REAL("\n4o. A TIMED PAUSE AND A REFUND IN THEIR OWN WORDS REACH THEIR FLOORS, NO
   chk(!r.includes(NEW), "\"money back please\" reaches the refund flow, never the coach's words", r.slice(0, 160));
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
+
+REAL("\n4p. THE MODEL IS DOWN: EACH REPORT IS STILL SAVED BY ITS OWN TOOL (the report floor, #568)");
+{ const F = "whatsapp:+27829438003"; await pool.query("DELETE FROM users WHERE phone_number = $1", [F]);
+  await db.insert(schema.users).values({ phoneNumber: F, name: "Floor Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(), subscriptionStatus: "active", goalType: "fat_loss", currentWeight: "82", calorieTarget: 1800, proteinTarget: 125 } as any);
+  const one = async (sql: string) => (await pool.query(sql.replace("$P", "(SELECT id FROM users WHERE phone_number = $1)"), [F])).rows[0];
+  (globalThis as any).__modelDown = true;
+  const cases: [string, string, () => Promise<boolean>][] = [
+    ["weight", "Weighed 84kg this morning", async () => Number((await one("SELECT current_weight c FROM users WHERE id = $P")).c) === 84 && (await one("SELECT count(*)::int n FROM weight_logs WHERE user_id = $P")).n === 1],
+    ["steps", "Walked 7400 steps today", async () => (await one("SELECT coalesce(sum(steps), 0)::int n FROM step_logs WHERE user_id = $P")).n === 7400],
+    ["water", "Drank 2 litres of water", async () => Number((await one("SELECT today_water w FROM users WHERE id = $P")).w) === 2],
+    ["sleep", "Slept 6 hours last night", async () => (await one("SELECT count(*)::int n FROM chat_history WHERE user_id = $P AND intent = 'SLEEP_LOG'")).n === 1],
+    ["workout done", "Workout done", async () => (await one("SELECT count(*)::int n FROM workout_logs WHERE user_id = $P")).n === 1],
+  ];
+  for (const [kind, said, saved] of cases) { const r = await say(F, said); chk(await saved() && !r.includes(NEW), `model down: "${said}" saves the ${kind}`, r.slice(0, 160)); }
+  (globalThis as any).__modelDown = false; await pool.query("DELETE FROM users WHERE phone_number = $1", [F]); }
 
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
