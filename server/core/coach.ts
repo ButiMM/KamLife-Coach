@@ -38,7 +38,8 @@ async function foodTools(user: any, message: string): Promise<string> {
   const [{ matchRestaurant, formatRestaurantGuide }, { answerSwapAsk, answerUnavailable, foodConstraints }] =
     await Promise.all([import("../restaurants"), import("../food-swaps")]);
   const out: string[] = [];
-  const hit = matchRestaurant(m);
+  // #695: on a pregnancy or eating-disorder hold the guide's kcal/g figures and fat-loss order are not handed over (the outbound floor refuses them)
+  const hit = withheldContext(user.lifeSituation) ? null : matchRestaurant(m);
   if (hit) out.push(`FROM THE RESTAURANT GUIDE (exact; use these items and numbers, no others):\n${formatRestaurantGuide(hit, user.goalType || "fat_loss")}`);
   const c = foodConstraints(user);
   const swap = answerSwapAsk(m, user.goalType, c) ?? answerUnavailable(message, c);

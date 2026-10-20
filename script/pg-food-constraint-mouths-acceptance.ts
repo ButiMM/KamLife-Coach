@@ -138,6 +138,11 @@ const recovering = await seed({ lifeSituation: "disordered_eating", calorieTarge
 chk(!target.test(await told(recovering.id, "what's my calorie target?")), "a client on an eating-disorder hold is not handed one either");
 const usual = await seed({ lifeSituation: null, calorieTarget: 2000, proteinTarget: 150 });
 chk(/2000 kcal/.test(await told(usual.id, "what's my calorie target?")), "CONTROL: a client with no hold still gets their target");
+// #695: "what should I get at KFC?" on a hold — the live pre-turn's food tools (the restaurant guide) carry no figure either.
+const { readPreTurn } = await import("../server/core/coach");
+const kfc = "what should I get at KFC?";
+chk(!target.test((await readPreTurn(pregnant.phone, kfc))?.tools ?? "x"), "a client on a pregnancy hold is not handed the restaurant guide's kcal or protein figures", (await readPreTurn(pregnant.phone, kfc))?.tools);
+chk(/\d\s*kcal/.test((await readPreTurn(usual.phone, kfc))?.tools ?? ""), "CONTROL: a client with no hold still gets the restaurant guide's figures");
 
 REAL("\n=== THE GROCERY BLOCK ===");
 
