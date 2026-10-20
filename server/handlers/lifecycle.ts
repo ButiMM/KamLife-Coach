@@ -34,6 +34,7 @@ import { sendCriticalAlert } from "../scheduler/shared";
 import { cancelPayFastSubscription, latestPayFastToken, handleRefundRequest } from "../routes/payments";
 import { isRefundAsk } from "./conversion";
 import { isAskingNotReporting, sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName, parseMealDate, isRetroactiveMeal, mealDateLabel, looksLikeQuestion, isMultiPartAsk} from "../utils";
+import { sastDayKey } from "../sast";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
@@ -432,17 +433,10 @@ export async function handleLifecycle(ctx: {
   // Only pause when the client EXPLICITLY wants to stop messages.
   // "I'm on holiday, any tips?" is a QUESTION — do NOT pause.
   // Questions contain: "?", "tips", "what can I", "how", "recommend", "suggest", "advice", "help"
-  const hasHolidayWord = /\b(holiday|pause|pausing|on holiday|going away|vacation|sick leave|taking a break|leave me alone|stop messaging|mute|quiet mode|don.?t message)\b/i.test(m);
+  const hasHolidayWord = /\b(holiday|pause|pausing|on holiday|going away|vacation|sick leave|taking a break|leave me alone|stop messaging|mute|stop (?:sending|texting|contacting|whatsapp(?:ing)?) me|quiet mode|don.?t message)\b/i.test(m);
   const isAskingQuestion = /\?|tips|what can|what should|how do|how can|recommend|suggest|advice|help|any ideas|give me/i.test(m);
   if (hasHolidayWord && !isAskingQuestion) {
-    // Parse duration
-    const daysMatch = m.match(/(\d+)\s*(day|days|week|weeks)/i);
-    let pauseDays = 7; // default 1 week
-    if (daysMatch) {
-      const num = parseInt(daysMatch[1]);
-      const unit = daysMatch[2].toLowerCase();
-      pauseDays = unit.startsWith("week") ? num * 7 : num;
-    }
+    let pauseDays = pauseDaysFrom(m); // the length they named, as asksForTimedPause accepts it (Codex @ 558089b: "two weeks" stored 7)
     pauseDays = Math.min(pauseDays, 30); // max 30 days
     const pauseUntil = await setExplicitPause(user, pauseDays);
     const pauseReply = `Got it. No check-in messages for ${pauseDays} day${pauseDays > 1 ? "s" : ""} — until ${pauseUntil}. Your programme is saved. When you are back, just message me and we pick up where we left off.`;
@@ -1575,4 +1569,24 @@ export async function markInjuryRecovered(user: any, phone: string, message: str
   const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
   await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
   return injuryReply;
+}
+
+const WORD_NUM: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, "a few": 3, couple: 2, "a couple of": 2 };
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+/** Days of pause the client asked for: "2 weeks", "two weeks", "a month", "until Monday". Default 7, cap 30 (by the caller). */
+export function pauseDaysFrom(m: string, now: Date = new Date()): number {
+  const n = m.match(/\b(\d+|an?|one|two|three|four|a\s+few|a\s+couple\s+of|couple)\s+(day|week|month)s?\b/i);
+  if (n) {
+    const k = n[1].toLowerCase().replace(/\s+/g, " ");
+    const num = /^\d+$/.test(k) ? parseInt(k, 10) : WORD_NUM[k] ?? 1;
+    const unit = n[2].toLowerCase();
+    return unit === "month" ? num * 30 : unit === "week" ? num * 7 : num;
+  }
+  const until = m.match(/\buntil\s+(?:next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  if (until) {
+    const sastDay = new Date(`${sastDayKey(now)}T00:00:00Z`).getUTCDay();
+    const diff = (WEEKDAYS.indexOf(until[1].toLowerCase()) - sastDay + 7) % 7;
+    return diff === 0 ? 7 : diff;
+  }
+  return 7;
 }
