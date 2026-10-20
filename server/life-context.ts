@@ -161,6 +161,12 @@ export function readLifeContext(message: string): ContextRead | null {
 
 const SADAG = `*SADAG* — 0800 567 567, free, 24 hours. Or SMS 31393 and they'll call you back.`;
 
+/** What a client on a hold is never sent: any kcal, gram or kg figure, a target, a deficit, fat or weight loss,
+ *  a weigh-in. The outbound floor refuses a body that matches; the coach's own context drops what matches (#698). */
+export function heldFigureIn(text: string): boolean {
+  return /\b\d[\d,]{1,5}\s*(?:kcal|calories|cal)\b|\b(?:calorie|kcal)\s+(?:target|goal|budget|deficit)|\bdeficit\b|\bfat[- ]loss\b|\bweight[- ]loss\b|\blos(?:e|ing)\s+(?:the\s+)?(?:weight|fat|\d+\s*kg)\b|\bweigh[- ]?ins?\b|\b(?:step|stand)\s+on\s+(?:a|the)\s+scale\b|\bweigh\s+yourself\b|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(text);
+}
+
 /**
  * THE PROMISE, AND THE KEY THAT KEEPS IT (#266). The disordered-eating reply has always said this;
  * nothing enforced it. It is now true because the outbound floor refuses calorie targets and
