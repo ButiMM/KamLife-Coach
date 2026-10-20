@@ -330,6 +330,17 @@ REAL("\n4k. BACK AFTER NINE QUIET DAYS, THE COACH IS TOLD (B6, #646)");
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4n. A CANCEL IN A SENTENCE REACHES THE CANCEL FLOW, NOT THE COACH'S WORDS (billing floor)");
+{
+  const T = "whatsapp:+27829438690";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Cancel Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const r = await say(T, "I'm cancelling my subscription. This is a whole bunch of shit.");
+  chk(/before i cancel|what's making you want to leave/i.test(r) && !r.includes(NEW), "\"I'm cancelling my subscription\" gets the cancel flow, never the coach's words", r.slice(0, 160));
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";
