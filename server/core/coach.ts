@@ -450,6 +450,8 @@ const SCHEDULED = {
   // B5: the programme moved up a phase; the facts of it come in `extra`, and "today" is appended as the move.
   phase: "Their training programme has just moved up a phase (see JUST HAPPENED). By first name, in two short lines, say they earned it from the real session count and name the new phase",
   silence: "They have not written for a few days or more (see the conversation dates). A short, warm hello by first name, in one or two lines: no guilt, no catching up, nothing about what they missed, no numbers",
+  // B4: Sunday's report card. Its numbers go out above these words, so the words recognise, never recount.
+  weekly: "It is Sunday: their weekly report card (JUST HAPPENED has its numbers, which are sent above your words). By first name, in one or two short lines, name the one thing in those numbers that mattered most this week, warmly and honestly. Don't repeat the numbers",
   // B9 (#647): days 1–3 of their programme (JUST HAPPENED says which), from what they have actually told you and logged.
   onboarding: "They started their programme in the last few days (JUST HAPPENED says which day). By first name, in two or three short lines, from what they have told you and logged so far: meet them where they are, and if it fits ask one open question about how it is going. No menus, no 'reply X', and never ask about a session they told you they could not do",
 } as const;
