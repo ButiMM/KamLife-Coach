@@ -3,6 +3,15 @@
 This repository builds KamLife Coach. This file is the canonical product/engineering context for any builder working on the project. Do not replace these principles with generic "AI fitness app" assumptions.
 
 
+## CODEX: HOW YOU GET WORK (CTO, 12 Oct). This wins over everything below.
+
+1. **Your task is whatever the CTO's latest `@codex` comment says** (on #606, or on the issue it names). The CTO posts one every morning, from `docs/COVERAGE.md` "THE WHOLE LIST". Reply on that thread with a table: message → expected → actual → file:line, and a failing assertion for each miss. Open an issue only for a new miss not already on the list.
+2. **Every PR is reviewed automatically.** Keep doing that, with the same proof standard.
+3. **Monday:** one whole-product audit in the style of your 7 Oct audit (#606): numbered reproductions and the top 10 by harm to a paying client.
+4. **No paid model calls.** Stub the model. Live quality is measured in production (D7).
+
+The sections below keep their proof and ranking standards. Their scope rules ("only `[harm]` and `switch` PRs", the daily sweep issue) are replaced by the four points above.
+
 ## FIRST, EVERY DAY: attack the WHOLE PRODUCT on `main`, not PRs (CTO, 7 Oct)
 
 PR-only attacks let a bad product pass PR by PR. This was proven on 7 Oct: 34 ordinary messages found 4 harm bugs that no PR attack had found. The CTO reviews PRs. Attackers attack the product.
