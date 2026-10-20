@@ -5761,6 +5761,8 @@ test("scope: off-domain asks are declined without a model", () => {
     "Please write me an essay about the history of Soweto for school", "can you help me fix this python code that keeps crashing",
     "give me betting tips for the weekend", "help me with my homework please",
     "Please write a business plan for my gym", "Can you write me a cover letter for a gym job?", // #354: a coaching word does not veto the ask
+    // Codex on #688: a unit inside the artefact is not a log report.
+    "Please write a business plan for a courier that delivers 5kg parcels.", "Write me an essay on the 10km Comrades history",
   ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
 });
 test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
@@ -5768,6 +5770,10 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "I lost money on crypto and can't afford the gym", "I need to update my CV so I skipped gym today",
     "Can you share some tips for sleep", "I bought stock cubes for the stew", "write me a workout plan for this week",
     "my doctor prescribed metformin, what should I eat?",
+    // #679: a letter or poem about their own training is coaching; a log in the same message reaches the coach.
+    "Write me a letter to my future self about why I'm losing weight", "Can you write me a poem to motivate me for my workout tomorrow",
+    "Can you write me a script for my gym routine?", "Please write my CV. Also I walked 8000 steps today and weighed 82kg",
+    "Write me an essay about climate change. Also I walked 8000 steps today",
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
 });
 test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
