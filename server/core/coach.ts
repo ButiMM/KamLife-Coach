@@ -124,7 +124,10 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
   for (const t of turns.reverse()) {
     if (t.input?.trim()) conversation.push({ role: "user", content: t.input.slice(0, 400) });
     const sent = (t.sent || t.reply || "").trim();
-    const said = held ? sent.replace(/~?\b\d[\d,.]*\s*(?:kcal|calories|cal|g|kg)\b/gi, "").replace(/[ \t]{2,}/g, " ") : sent;
+    const said = held ? sent // the figure forms the outbound floor refuses: "360 kcal", "34g", "150 grams", "82kg", and "Calories: 2,000"
+      .replace(/~?\b\d[\d,.]*\s*(?:kcal|calories|cal|grams?|g|kgs?|kilos?)\b/gi, "")
+      .replace(/\b(calories|kcal|protein|carbs?|fat|macros?)(\s*[:=]?\s*\*?)~?\d[\d,.]*/gi, "$1")
+      .replace(/[ \t]{2,}/g, " ") : sent;
     if (said) conversation.push({ role: "assistant", content: said.slice(0, 500) });
   }
   const tools = message ? await foodTools(u, message).catch(() => "") : "";
