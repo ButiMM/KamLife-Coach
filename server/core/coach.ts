@@ -21,7 +21,8 @@ import { users, coreShadow, turnLedger, clientEvents, chatHistory, mealLogs } fr
 import { assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
 import { ONE_VOICE } from "../coach-prompt";
-import { withheldContext } from "../life-context";
+import { withheldContext, heldFigureIn } from "../life-context";
+import { dropSentences } from "../reply-hygiene";
 
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
@@ -119,9 +120,13 @@ export async function readPreTurn(phone: string, message?: string): Promise<PreT
       .from(turnLedger).where(eq(turnLedger.userId, u.id)).orderBy(desc(turnLedger.createdAt)).limit(6),
   ]);
   const conversation: PreTurn["conversation"] = [];
+  // On a hold, a figure the coach sent before the disclosure is not handed back to it either (#698).
+  const held = withheldContext(u.lifeSituation);
   for (const t of turns.reverse()) {
     if (t.input?.trim()) conversation.push({ role: "user", content: t.input.slice(0, 400) });
-    const said = (t.sent || t.reply || "").trim();
+    const sent = (t.sent || t.reply || "").trim();
+    // the same test the outbound floor refuses on, sentence by sentence: what the coach said before the disclosure
+    const said = held ? dropSentences(sent, heldFigureIn) : sent;
     if (said) conversation.push({ role: "assistant", content: said.slice(0, 500) });
   }
   const tools = message ? await foodTools(u, message).catch(() => "") : "";

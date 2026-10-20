@@ -38,14 +38,14 @@ export function splitSentences(text: string): string[] {
   return (text || "").trim().split(/(?<=[.!?])(\s+)/);
 }
 
-function dropSentences(text: string, re: RegExp): string {
+export function dropSentences(text: string, re: RegExp | ((s: string) => boolean)): string {
   const t = (text || "").trim();
   if (!t) return "";
   const parts = splitSentences(t); // [sentence, sep, sentence, sep, …]
   let out = "";
   for (let i = 0; i < parts.length; i += 2) {
     const sentence = parts[i];
-    if (!sentence || re.test(sentence)) continue;
+    if (!sentence || (typeof re === "function" ? re(sentence) : re.test(sentence))) continue;
     out += sentence + (parts[i + 1] ?? "");
   }
   return out

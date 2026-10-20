@@ -138,9 +138,10 @@ run_case "the quit save answers a safety disclosure" server/handlers/safety.ts \
   '  if (looksLikeQuitMoment(message)) {' || failed=$((failed + 1))
 
 # 14. A PROTEIN / MACRO TARGET REACHES A WITHHELD CLIENT (Codex review @ 8e4f231).
-run_case "a protein target passes the withheld floor" server/outbound-authority.ts \
-  '|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(body)) {' \
-  '/i.test(body)) {' || failed=$((failed + 1))
+# The floor's pattern lives in life-context.ts heldFigureIn() since #699 (the coach's context reads the same rule).
+run_case "a protein target passes the withheld floor" server/life-context.ts \
+  '|\b(?:calories|kcal|protein|carbs?|fat|macros?)\s*[:=]?\s*\*?\d|\b\d{2,4}\s*g\b|\bprotein\s+(?:target|goal)\b|\b(?:target|goal)\s+weight\b|\b\d{2,3}(?:[.,]\d+)?\s*kg\b/i.test(text);' \
+  '/i.test(text);' || failed=$((failed + 1))
 
 # 15. AN OPEN CASE SWALLOWS THE URGENT ONE (Codex review @ 8e4f231).
 run_case "an unrelated open escalation absorbs a disordered-eating disclosure" server/handlers/chat-log.ts \
