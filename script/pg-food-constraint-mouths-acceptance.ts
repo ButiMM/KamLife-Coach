@@ -131,8 +131,8 @@ chk(/Does not eat: eggs/.test(await told(noEggs.id, "what should I eat")), "a li
 
 // A pregnant client's "what's my calorie target?" (no pregnancy word, so the safety floor doesn't fire)
 // reaches the new coach: it must not be handed the number (#391, CTO 11:10 20 Oct). Paired with its control.
-const target = /2000|150g|kcal left in the day\.|forecast/; // the target, what is left of it, and the weight-loss forecast
-const pregnant = await seed({ lifeSituation: "pregnant", calorieTarget: 2000, proteinTarget: 150 });
+const target = /\d\s*kcal|\d\s*g\b|\d\s*kg|forecast/; // any kcal, gram or kg figure (the outbound floor refuses them all on a hold), and the forecast
+const pregnant = await seed({ lifeSituation: "pregnant", calorieTarget: 2000, proteinTarget: 150, currentWeight: 82 });
 chk(!target.test(await told(pregnant.id, "what's my calorie target?")), "a client on a pregnancy hold is not handed a kcal or protein target", await told(pregnant.id, "what's my calorie target?"));
 const recovering = await seed({ lifeSituation: "disordered_eating", calorieTarget: 2000, proteinTarget: 150 });
 chk(!target.test(await told(recovering.id, "what's my calorie target?")), "a client on an eating-disorder hold is not handed one either");
