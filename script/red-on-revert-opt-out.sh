@@ -116,7 +116,7 @@ run_case "the payment webhook ignores the opt-out" server/routes/payments.ts \
 # 9. A TOPIC IS READ AS THE CHANNEL (Codex @ 7716559) — "messages about calories, just send my
 #    workouts" opts the client out of everything.
 run_case "a topic refusal opts the client out" server/handlers/safety.ts \
-  '    && !/\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
+  '    && !namesATopic(m);' \
   '    && true;' || failed=$((failed + 1))
 
 # 10. RECOVERY IS READ AS CONSENT (Codex @ bbffa67) — "I'm back" wipes the opt-out with the pause.

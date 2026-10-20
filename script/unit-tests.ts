@@ -5365,6 +5365,21 @@ test("brain gate: cancellation/billing skips the brain (real flow must run)", ()
     assert.ok(!looksLikeBillingOrCancel(msg), `must NOT match: ${msg}`);
 });
 
+test("#692: money back only as a request; a topic pause is not a pause; a written length is the length", async () => {
+  for (const msg of ["money back please", "I want my money back", "Money back."])
+    assert.ok(looksLikeBillingOrCancel(msg), `refund ask: ${msg}`);
+  for (const msg of ["The money back guarantee made me comfortable signing up", "I got my money back from the gym, so I'm all in"])
+    assert.ok(!looksLikeBillingOrCancel(msg), `not a refund ask: ${msg}`);
+  const { asksForTimedPause } = await import("../server/handlers/safety");
+  assert.ok(asksForTimedPause("Please stop messaging me for 2 weeks, I'm on holiday"));
+  assert.ok(!asksForTimedPause("Stop messaging me about my weight for 2 weeks"), "a topic is not the channel");
+  const { pauseDaysFrom } = await import("../server/handlers/lifecycle");
+  assert.equal(pauseDaysFrom("stop messaging me for two weeks"), 14);
+  assert.equal(pauseDaysFrom("stop messaging me for 2 weeks"), 14);
+  assert.equal(pauseDaysFrom("stop messaging me for a month"), 30);
+  assert.equal(pauseDaysFrom("stop messaging me until Monday", new Date("2026-10-20T10:00:00Z")), 6);
+});
+
 test("guardrails: 'I hear you' scrub never bites into 'your' (the 'r frustration' bug)", () => {
   const ctx = { userMessage: "", budgetTier: "", injuries: "" } as any;
   const r = enforceCoachGuardrails("I hear your frustration, and I'm sorry for the mix-up.", ctx);
