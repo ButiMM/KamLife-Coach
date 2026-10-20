@@ -21,6 +21,7 @@ import { users, coreShadow, turnLedger, clientEvents, chatHistory, mealLogs } fr
 import { assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
 import { ONE_VOICE } from "../coach-prompt";
+import { withheldContext } from "../life-context";
 
 export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
@@ -58,10 +59,13 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   const sa = (o: Intl.DateTimeFormatOptions) => new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", ...o });
   const lines = [`Time now: ${sa({ weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false })} (SA). Today's numbers are a running count, not a finished day.`];
   const profile = getGoalProfile(user.goalType);
-  lines.push(profile.usesMacros
+  // A PREGNANCY OR EATING-DISORDER HOLD (#391, CTO 11:10 20 Oct): the coach is not handed a number it must not say.
+  const withheld = withheldContext(user.lifeSituation);
+  if (withheld) lines.push("Numbers: PAUSED. Never give a kcal or protein target, or kcal left in the day; if they ask, their doctor or clinic guides their eating now.");
+  else lines.push(profile.usesMacros
     ? `Goal: ${String(user.goalType || "fat_loss").replace(/_/g, " ")}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`
     : `Goal: ${profile.label}. This client is not chasing numbers: never push a kcal or protein target.`);
-  const frame = energyFrameLine(user.goalType, user.calorieTarget);
+  const frame = withheld ? null : energyFrameLine(user.goalType, user.calorieTarget);
   if (frame) lines.push(frame);
   const health = readHealthState(user);
   if (health.isSick) lines.push(`Sick: resting until about ${(health as any).sickUntil ?? "they say they're better"}. Care first; no training or calorie pressure.`);
@@ -77,7 +81,7 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   const d = t.today;
   const cal = Number(user.calorieTarget) || 0;
   lines.push(d.meals.length
-    ? `Food today: ${d.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}. About ${Math.round(d.kcal)} kcal and ${Math.round(d.protein)}g protein so far${cal && profile.usesMacros ? `; about ${Math.max(0, cal - Math.round(d.kcal))} kcal left in the day` : ""}.`
+    ? `Food today: ${d.meals.map(m => `${m.label || "meal"}: ${m.foods}`).join("; ")}. About ${Math.round(d.kcal)} kcal and ${Math.round(d.protein)}g protein so far${cal && profile.usesMacros && !withheld ? `; about ${Math.max(0, cal - Math.round(d.kcal))} kcal left in the day` : ""}.`
     : "Food today: nothing logged yet. Don't scold, don't invent intake.");
   // Walking calories (from advice-commands, deleted 6 Oct): the estimate is stepBurnKcal's, and the target already counts activity.
   const burn = d.steps ? stepBurnKcal(d.steps, Number(user.currentWeight) || 75) : 0;
@@ -88,7 +92,7 @@ export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   lines.push(wt.withheld ? "Weight: they asked us not to raise it. Never mention the scale."
     : wt.currentKg != null ? `Weight: now ${wt.currentKg}kg${wt.startKg != null && wt.startKg !== wt.currentKg ? `, started at ${wt.startKg}kg` : ""}${wt.toGoalKg != null ? `, ${Math.abs(wt.toGoalKg)}kg still to ${wt.toGoalKg < 0 ? "lose" : "gain"}` : ""}.`
     : "Weight: no weigh-in on record. Never quote a weight.");
-  if (!wt.withheld) { // A12: "am I on track?" is answered from the trajectory owner's numbers, never a second computation
+  if (!wt.withheld && !withheld) { // A12: "am I on track?" is answered from the trajectory owner's numbers, never a second computation
     const r = await (await import("../trajectory-report")).getTrajectoryForUser(user.id).catch(() => null);
     if (r) lines.push(`Trajectory from their last 7 days of logs (quote only these numbers): ${r.whatsappText.replace(/\*/g, "").replace(/\s+/g, " ").slice(0, 500)}`);
   }
