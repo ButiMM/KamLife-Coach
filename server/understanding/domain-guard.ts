@@ -95,7 +95,10 @@ export function offDomainRedirect(message: string, ongoing = false): string | nu
   // "I had to update my CV so I skipped gym" is a life event, not an ask: coaching words win. But a request
   // that OPENS by asking for the artefact ("Please write a business plan for my gym") is declined whatever it names (#354).
   // A message that also reports a log goes to the coach: it declines the artefact and still writes the steps (#679).
-  if (/\b\d[\d,.]*\s*(?:k\b|kg|kgs|steps|km|litres?)|\bi\s+(?:had(?!\s+to\b)|ate|walked|ran|trained|weighed)\b/i.test(t)) return null; // "I had to update my CV" is not a log
+  // A log is a real report: a first-person report verb with a measured number in the same clause ("I walked 8000
+  // steps", "weighed 82kg", "drank 2 litres") or a bare step count. A unit inside the artefact ("5kg parcels",
+  // "the 10km Comrades") is not a log (Codex on #688).
+  if (/\b(?:i\s+(?:just\s+)?)?(?:walked|ran|jogged|cycled|swam|did|weighed|weigh|drank|had(?!\s+to\b))\b[^.?!;,]{0,20}?\b\d[\d,.]*\s*(?:k\b|kg|kgs|km|steps|litres?|l\b|ml|glasses|reps|minutes|mins?)(?!\s+[a-z]*(?:parcels?|bags?|boxes|deliver\w*|race|marathon|history)\b)|(?:^|[.?!]\s*|\b(?:and|also)\s+)\d[\d,.]*\s*k?\s*steps\b/i.test(t)) return null;
   // Hard artefacts are declined whatever they name; a letter, poem, story, speech or script about their training,
   // weight or motivation is coaching ("write me a letter to my future self about why I'm losing weight", #679).
   if (OFF_DOMAIN_ASK_RE.test(t) && (/^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:write|draft|create|make|do)\s+(?:me\s+|us\s+)?(?:an?\s+|my\s+|the\s+)?(?:essay|assignment|business plan|cv|cover letter|motivation letter|email|code)\b/i.test(t) || !isObviouslyInDomain(t))) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
