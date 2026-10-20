@@ -527,8 +527,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   if (front?.reply) return tag(front.reply, front.src);
   // THE REPORT FLOOR (#568 batch 2): the coach could not read the turn, so a weigh-in, steps, water, sleep or a finished
   // session is still saved by the tool that owns it, in the tool's own words. A plate is not the floor's: while
-  // the food door below lives, a turn carrying food goes there whole.
-  const floorSaved = frontOwns && !turnFacts.hasFoodReport ? await (await import("./understanding/report-floor")).reportFloor({ phone, message, m, user, sourceMessageId }) : null;
+  // the food door below lives, a turn carrying food goes there whole, and so does a catch-up across several days (the
+  // backfill door dates each one).
+  const floorSaved = frontOwns && !turnFacts.hasFoodReport && !attributeMultiDayReport(message).hasMultipleDays ? await (await import("./understanding/report-floor")).reportFloor({ phone, message, m, user, sourceMessageId }) : null;
   if (floorSaved) return closeCoachingTurn(floorSaved);
   // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
   // above, before the rewriter. If the note carries two or more, no handler below may end the
