@@ -138,6 +138,12 @@ const recovering = await seed({ lifeSituation: "disordered_eating", calorieTarge
 chk(!target.test(await told(recovering.id, "what's my calorie target?")), "a client on an eating-disorder hold is not handed one either");
 const usual = await seed({ lifeSituation: null, calorieTarget: 2000, proteinTarget: 150 });
 chk(/2000 kcal/.test(await told(usual.id, "what's my calorie target?")), "CONTROL: a client with no hold still gets their target");
+// The live path, not only ledgerNumbers: readPreTurn's restaurant guide carries exact kcal and grams too (#694 Codex @ 0b1b980).
+const { readPreTurn } = await import("../server/core/coach");
+const kfc = "what should I get at KFC?";
+const heldTools = (await readPreTurn(pregnant.phone, kfc))?.tools ?? "";
+chk(!/\d\s*(?:kcal|g\b)/.test(heldTools), "a client on a pregnancy hold asking about KFC is handed no restaurant figures", heldTools.slice(0, 120));
+chk(/RESTAURANT GUIDE/.test((await readPreTurn(usual.phone, kfc))?.tools ?? ""), "CONTROL: a client with no hold still gets the KFC guide");
 
 REAL("\n=== THE GROCERY BLOCK ===");
 

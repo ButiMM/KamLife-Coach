@@ -34,6 +34,7 @@ export interface PreTurn { userId: string; name: string; facts: string; known: s
  * tables are deterministic and correct; the composer quotes them instead of inventing numbers.
  */
 async function foodTools(user: any, message: string): Promise<string> {
+  if (withheldContext(user.lifeSituation)) return ""; // a hold: the guide's kcal, grams and fat-loss swaps are refused at the outbound floor (#694 Codex)
   const m = message.toLowerCase();
   const [{ matchRestaurant, formatRestaurantGuide }, { answerSwapAsk, answerUnavailable, foodConstraints }] =
     await Promise.all([import("../restaurants"), import("../food-swaps")]);
