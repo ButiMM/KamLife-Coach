@@ -145,10 +145,11 @@ const heldTools = (await readPreTurn(pregnant.phone, kfc))?.tools ?? "";
 chk(!/\d\s*(?:kcal|g\b)/.test(heldTools), "a client on a pregnancy hold asking about KFC is handed no restaurant figures", heldTools.slice(0, 120));
 chk(/RESTAURANT GUIDE/.test((await readPreTurn(usual.phone, kfc))?.tools ?? ""), "CONTROL: a client with no hold still gets the KFC guide");
 // A figure sent BEFORE the disclosure is in the recent conversation the coach reads (#698).
-const guide = "Zinger wrap: ~360 kcal and ~34g protein, or 150 grams of chicken. Calories: 2,000; Protein: 150.";
+const guide = "Try the Zinger wrap. It is ~360 kcal and ~34g protein. Your calorie target is 2,000 kcal and your protein target is 150g.\nCalories: 2,000; Protein: 150.";
 await db.insert(schema.turnLedger).values([{ userId: pregnant.id, inputText: kfc, reply: guide }, { userId: usual.id, inputText: kfc, reply: guide }] as any);
 const heldSaid = ((await readPreTurn(pregnant.phone, kfc))?.conversation ?? []).map(c => c.content).join(" | ");
-chk(/Zinger/.test(heldSaid) && !/\d\s*(?:kcal|g\b|grams|kg)|(?:calories|protein)\s*:?\s*\d/i.test(heldSaid), "a client on a pregnancy hold: earlier kcal and grams are not in the conversation the coach reads", heldSaid);
+const { heldFigureIn } = await import("../server/life-context"); // the outbound floor's own test, so nothing the coach reads can trip it
+chk(/Zinger/.test(heldSaid) && !heldFigureIn(heldSaid), "a client on a pregnancy hold: earlier kcal and grams are not in the conversation the coach reads", heldSaid);
 chk(/360 kcal/.test(((await readPreTurn(usual.phone, kfc))?.conversation ?? []).map(c => c.content).join(" ")), "CONTROL: a client with no hold still has the earlier figures");
 
 REAL("\n=== THE GROCERY BLOCK ===");
