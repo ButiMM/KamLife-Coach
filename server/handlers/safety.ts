@@ -119,13 +119,21 @@ async function ensureSafetyTurnUser(
  * OPT-OUT, IN THE CLIENT'S OWN WORDS (#265). A request with a length ("for 2 weeks") is still the
  * holiday pause lifecycle.ts owns; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559).
  */
+/** "Stop messaging me", in the client's own words, with or without a length. */
+function saysStopMessaging(m: string): boolean {
+  return /^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
+      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m);
+}
+const namesALength = (m: string) => /\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b/i.test(m);
 function asksToOptOut(m: string): boolean {
-  return (/^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
-      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m))
+  return saysStopMessaging(m) && !namesALength(m)
     // A LENGTH is a pause; a TOPIC is a preference, not a channel opt-out (Codex @ 7716559): "I don't
     // want your messages about calories, just send my workouts" asked for workouts.
-    && !/\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
+    && !/\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);
 }
+/** "Please stop messaging me for 2 weeks, I'm on holiday": a timed pause. The lifecycle pause owner sets it, so the
+ *  front door must not take it (the coach has no pause action: the client kept getting messages). */
+export function asksForTimedPause(m: string): boolean { return saysStopMessaging(m) && namesALength(m); }
 
 /** Record the opt-out and say so. NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5). */
 async function recordOptOut(ou: any, named: boolean): Promise<string> {

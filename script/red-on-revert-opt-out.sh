@@ -78,8 +78,8 @@ run_case "a natural-language opt-out is not recognised" server/handlers/safety.t
 
 # 2. A TIMED REQUEST BECOMES A PERMANENT OPT-OUT — "stop messaging me for 2 weeks" never resumes.
 run_case "a request with a length is treated as a permanent opt-out" server/handlers/safety.ts \
-  '    && !/\b\d+\s*(?:days?|weeks?|months?)\b' \
-  '    && !/\bxq265\b' || failed=$((failed + 1))
+  '  return saysStopMessaging(m) && !namesALength(m)' \
+  '  return saysStopMessaging(m) && true' || failed=$((failed + 1))
 
 # 3. THE OPT-OUT IS NOT RECORDED — the reply says "No more messages", nothing holds it.
 run_case "the opt-out is not recorded" server/handlers/safety.ts \
@@ -116,8 +116,8 @@ run_case "the payment webhook ignores the opt-out" server/routes/payments.ts \
 # 9. A TOPIC IS READ AS THE CHANNEL (Codex @ 7716559) — "messages about calories, just send my
 #    workouts" opts the client out of everything.
 run_case "a topic refusal opts the client out" server/handlers/safety.ts \
-  '|\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
-  '/i.test(m);' || failed=$((failed + 1))
+  '    && !/\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);' \
+  '    && true;' || failed=$((failed + 1))
 
 # 10. RECOVERY IS READ AS CONSENT (Codex @ bbffa67) — "I'm back" wipes the opt-out with the pause.
 run_case "an ordinary unpause lifts the opt-out" server/health-state.ts \

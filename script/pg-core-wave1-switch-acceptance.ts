@@ -341,6 +341,20 @@ REAL("\n4n. A CANCEL IN A SENTENCE REACHES THE CANCEL FLOW, NOT THE COACH'S WORD
   await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
 }
 
+REAL("\n4o. A TIMED PAUSE AND A REFUND IN THEIR OWN WORDS REACH THEIR FLOORS, NOT THE COACH'S WORDS");
+{
+  const T = "whatsapp:+27829438691";
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+  await db.insert(schema.users).values({ phoneNumber: T, name: "Floor Tester", onboardingState: "COMPLETE", popiConsent: true, popiConsentAt: new Date(),
+    subscriptionStatus: "active", goalType: "fat_loss", calorieTarget: 1800, proteinTarget: 120 } as any);
+  const p = await say(T, "Please stop messaging me for 2 weeks, I'm on holiday");
+  const notes = (await pool.query("SELECT profile_notes FROM users WHERE phone_number = $1", [T])).rows[0]?.profile_notes || "";
+  chk(/paused_until:/.test(notes) && !p.includes(NEW), "\"stop messaging me for 2 weeks, I'm on holiday\" sets the pause, never the coach's words", `${notes} | ${p.slice(0, 140)}`);
+  const r = await say(T, "money back please");
+  chk(!r.includes(NEW), "\"money back please\" reaches the refund flow, never the coach's words", r.slice(0, 160));
+  await pool.query("DELETE FROM users WHERE phone_number = $1", [T]);
+}
+
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
 {
   const T = "whatsapp:+27829438015";

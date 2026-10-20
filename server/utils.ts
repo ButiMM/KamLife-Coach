@@ -969,7 +969,7 @@ export function stripFoodLoggedClaim(text: string): string {
 // (which stops billing and alerts the founder), never the brain. 2026-07-10: "I'm
 // cancelling my subscription" got a limp model reply and NO cancellation action.
 export function looksLikeBillingOrCancel(m: string): boolean {
-  return /\b(cancel(?:ling|led)?|unsubscribe|stop (?:my )?(?:subscription|billing|payments?|coaching)|refund|charged? (?:me|twice|wrong)|billing (?:problem|issue|query)|payment (?:failed|problem|issue)|don'?t bill me|stop charging)\b/i.test(m)
+  return /\b(cancel(?:ling|led)?|unsubscribe|stop (?:my )?(?:subscription|billing|payments?|coaching)|refund|money back|charged? (?:me|twice|wrong)|billing (?:problem|issue|query)|payment (?:failed|problem|issue)|don'?t bill me|stop charging)\b/i.test(m)
     // "cancel today's workout / this session / tomorrow's meal" is a schedule change,
     // never a subscription cancellation (2026-07-12 collision probe caught "cancel
     // today's workout, my back is acting up" landing in the billing flow).
