@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — The Definitive Rebuild Blueprint
 
 **This is the canonical plan. The builder executes against this document.**

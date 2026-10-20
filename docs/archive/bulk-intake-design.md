@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # Bulk Intake — one-paste onboarding (design, ready to build)
 
 **Why (2026-07-07, from production):** a real manual client sent her ENTIRE intake

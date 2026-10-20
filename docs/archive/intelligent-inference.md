@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # Intelligent inference — "infer, don't interrogate"
 
 > **Status: EXECUTED — 17 July 2026.** The design conversation happened and the

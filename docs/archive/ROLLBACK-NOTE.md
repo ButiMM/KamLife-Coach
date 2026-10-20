@@ -1,1 +1,3 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 Temporary engineering note: revert the learned-pattern memory slice to restore the last known-green production line. The memory implementation remains preserved on its source branch for re-application as a smaller, independently verified slice after the Railway failure is understood.

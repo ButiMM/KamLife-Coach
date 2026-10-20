@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # KamLife Coach — State, Architecture & Direction
 ### A briefing for external technical & product review
 **Prepared:** 2026-07-21  ·  **Stage:** Pre-launch, private beta  ·  **Platform:** WhatsApp (Twilio) · Node/TypeScript · PostgreSQL · Railway

@@ -108,4 +108,4 @@ Track A has no work in it. **Go straight to Track B**, whose requirements stand 
 
 The one genuine reliability item — the single truncated `"…for these spots:"` reply — is a real
 defect with a real downstream cost, but it is one occurrence in 114 turns and does not justify a
-track of its own. It belongs in `docs/BACKLOG.md` with the logging findings.
+track of its own. It belongs in `docs/archive/BACKLOG.md` with the logging findings.

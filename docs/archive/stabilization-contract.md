@@ -1,3 +1,5 @@
+> **Archived 15 Oct 2026 (#331).** Superseded by `docs/ORDERS.md` and `docs/COVERAGE.md`; it may contradict the code.
+
 # Stabilization Contract — no new features until this bar is met
 
 _2026-07-13. Declared after tester round 3. The product is FROZEN for features.
