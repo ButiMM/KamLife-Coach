@@ -16,7 +16,8 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 - **CI:** `npm test` on `main` is 38/38 green locally. `main` has no push CI.
 - **Trace:** run with `TRACE_MODEL=stub` against a fresh Postgres. Every message that should write still writes: meals, the two-meal message, "same as lunch", steps, weight, workout, sleep (now written, unlike 15 Oct) and the reminder row. Memory: knee, night shifts and no fish are stored; "fine now" and "forget that" end their facts, and only "no fish" stays active.
 - **New from the trace:** a resent meal with anything else in the message gets only the receipt line, so "I have diabetes. Had a kota for lunch" → "Got it — that's already in your log ✅" (#702).
-- **Codex:** there has been no task on #606 since the 15 Oct pause, and it resumes today with safety. The PR review on #701 found a real P1 (an outage turn loses a supplement logged beside water). The 15 Oct talk findings still reproduce at source on `692f2a0`: #682 (a "6 days logged" claim passes the verifier; the plateau check sees only 7 days) and #683 (the cousin poem escapes the floor; Afrikaans "Ek is hopeloos" isn't seen as shame).
+- **Codex safety journey (#606, 21 Oct): six safety floors miss non-English or natural wording, all reproduced by the CTO and filed as [harm]:** isiZulu passive suicidal ideation (#704), a Setswana/Sesotho pregnancy disclosure (#705), "chest went tight, left arm tingling" (#706), Afrikaans purging (#707), an isiXhosa opt-out (#708), and metformin timing (#709). A bare "1,650" gets past the hold check (#710, EDGE). The controls passed: a third-party age of 15 doesn't block the adult, and "medicine ball" is equipment.
+- **Codex before today:** there was no #606 task between the 15 Oct pause and today. The PR review on #701 found a real P1 (an outage turn loses a supplement logged beside water). The 15 Oct talk findings still reproduce at source on `692f2a0`: #682 (a "6 days logged" claim passes the verifier; the plateau check sees only 7 days) and #683 (the cousin poem escapes the floor; Afrikaans "Ek is hopeloos" isn't seen as shame).
 - **Size:** server is 70,428 lines, against the 64,500 checkpoint.
 
 ### A. What the client sends
@@ -39,7 +40,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **A15** | Sick or injured pause, pain | Old `sick-flow`; "stop messaging me for 2 weeks" pauses (#692) | Through the coach; trace case; "until the end of the month" pauses 7 days (#693) | #693 | B |
 | **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | A wrong logged-day count passes the verifier (#682, still reproduces 21 Oct) | #682 | I |
 | **A17** | Off-topic redirect | Built (#657; #688: "medicine ball", a letter about their own training, and a log beside an off-domain ask) | "Write my cousin a birthday poem" still escapes (#683); an off-domain ask that doesn't open the message gets through (#691) | #683 #691 | D |
-| **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in the trace) | Live proof per language; Afrikaans shame ("Ek is hopeloos") skips the shame-safe receipt (#683, still reproduces 21 Oct) | #683 | I |
+| **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in the trace) | Live proof per language; Afrikaans shame ("Ek is hopeloos") skips the shame-safe receipt (#683, still reproduces 21 Oct); the safety floors miss isiZulu, Setswana/Sesotho, Afrikaans and isiXhosa wording (#704, #705, #707, #708) | #683 #704 #705 #707 #708 | I |
 | **A19** | Promises followed up | Built (#545, #564, #629, #652) | Shame filter on the reply after a miss | #563 | D |
 
 ### B. What the coach sends first (**proactive**)
@@ -56,7 +57,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **B9** | Onboarding catch-ups | Built (#665: days 1–3 in the coach's words, from the record) | Live proof with a new tester | — | F |
 | **B10** | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
 | **B11** | Outside 24h: approved template or nothing | Built (#653) | Check-in template SID approved (founder); the dashboard check-in to quiet clients reaches nobody and shows the wrong reason (#681) | #415 #681 | J |
-| **B12** | Opt-out on every path | Built (Codex verified 13 Oct) | — | — | — |
+| **B12** | Opt-out on every path | **Open [harm]:** an isiXhosa opt-out isn't recognised, so scheduled sends continue (#708) | Opt-out phrases in all five languages | #708 | **A** |
 | — | Every scheduled send through one owner | Open; target changes now go through the guarded send (#671) | The other jobs | #319 | F |
 
 ### C. Money, trust, safety
@@ -67,7 +68,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **C3** | Cancel and refund do what they say | Built (#687: a refund never overwrites the cancel-by-hand task; #690: a cancel inside a sentence reaches the cancel flow; #692: "money back please" reaches the refund flow) | Live proof | — | E |
 | **C4** | Delete my data | Built (#625) | — | — | H |
 | **C5** | Under 18 | Built (#574) | — | — | — |
-| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658; #688 "medicine ball"; on a hold the coach gets no targets, forecast or restaurant kcal, and no earlier figures: #694, #697, #699) | The client's own earlier figures are still handed back on a hold (#700, EDGE; the outbound floor still holds). Codex safety journey today | #700 | D |
+| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658; #688 "medicine ball"; on a hold the coach gets no targets, forecast or restaurant kcal, and no earlier figures: #694, #697, #699) | **Open [harm]: the floors are English-only in places** (Codex 21 Oct): isiZulu crisis (#704), Setswana/Sesotho pregnancy (#705), chest and left arm (#706), Afrikaans purging (#707), metformin timing (#709). The client's own earlier figures on a hold (#700), a bare "1,650" (#710) | #704 #705 #706 #707 #709 #700 #710 | **A** |
 | **C7** | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
 | **C8** | Referrals | Built (#663) | The free month can be farmed: refund, reset, duplicate codes (#680) | #680 | E |
 
@@ -102,7 +103,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | Daily market, competitor and pricing check | CTO daily run (see #391, 21 Oct) | — | — |
 
 ### The never-see list (TESTER-EXPERIENCE), checked in every 07:00 worst-five and every Codex journey
-"Reply 1/2/3" menus (built: C1, #667) · a receipt as the whole reply (**open: #702**) · "log a meal" nags · invented facts (**open: #682**, logged-day counts) · generic "checking in" (built: B11, #653) · two contradicting messages (built: B9, #665; C2, #662) · a shopping list on cancel · asked again for something already told (A13) · a weight-loss target when pregnant (built; #694, #697, #699).
+"Reply 1/2/3" menus (built: C1, #667) · a receipt as the whole reply (**open: #702**) · "log a meal" nags · invented facts (**open: #682**, logged-day counts) · generic "checking in" (built: B11, #653) · two contradicting messages (built: B9, #665; C2, #662) · a shopping list on cancel · asked again for something already told (A13) · a weight-loss target when pregnant (built for English disclosures; **open for Setswana/Sesotho, #705**).
 
 ---
 
