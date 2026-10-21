@@ -57,7 +57,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **B9** | Onboarding catch-ups | Built (#665: days 1–3 in the coach's words, from the record) | Live proof with a new tester | — | F |
 | **B10** | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
 | **B11** | Outside 24h: approved template or nothing | Built (#653) | Check-in template SID approved (founder); the dashboard check-in to quiet clients reaches nobody and shows the wrong reason (#681) | #415 #681 | J |
-| **B12** | Opt-out on every path | **Open [harm]:** an isiXhosa opt-out isn't recognised, so scheduled sends continue (#708) | Opt-out phrases in all five languages | #708 | **A** |
+| **B12** | Opt-out on every path | **Open [harm]:** an isiXhosa opt-out isn't recognised, so scheduled sends continue (#708) | PR #714 is in review (ATTACK: "don't send me the water reminder" opts out of everything) | #708 | **A** |
 | — | Every scheduled send through one owner | Open; target changes now go through the guarded send (#671) | The other jobs | #319 | F |
 
 ### C. Money, trust, safety
@@ -68,7 +68,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **C3** | Cancel and refund do what they say | Built (#687: a refund never overwrites the cancel-by-hand task; #690: a cancel inside a sentence reaches the cancel flow; #692: "money back please" reaches the refund flow) | Live proof | — | E |
 | **C4** | Delete my data | Built (#625) | — | — | H |
 | **C5** | Under 18 | Built (#574) | — | — | — |
-| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658; #688 "medicine ball"; on a hold the coach gets no targets, forecast or restaurant kcal, and no earlier figures: #694, #697, #699) | **Open [harm]: the floors are English-only in places** (Codex 21 Oct): isiZulu crisis (#704), Setswana/Sesotho pregnancy (#705), chest and left arm (#706), Afrikaans purging (#707), metformin timing (#709). The client's own earlier figures on a hold (#700), a bare "1,650" (#710) | #704 #705 #706 #707 #709 #700 #710 | **A** |
+| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658; #688 "medicine ball"; on a hold the coach gets no targets, forecast or restaurant kcal, and no earlier figures: #694, #697, #699) | **Open [harm]** (Codex 21 Oct). Merged 21 Oct: the isiZulu, isiXhosa, Sesotho, Setswana and Afrikaans crisis wording (#712 for #704) and pregnancy wording (#713 for #705). In review: Afrikaans and isiZulu purging (PR #715 for #707; ATTACK: flu is read as purging, "ngemuva" is missed) and metformin timing (PR #716 for #709; ATTACK: "take it slow" is read as timing). Still open: chest and left arm (#706); the medication floor has no SA-language medicine words (#718); the client's own earlier figures on a hold (#700); a bare "1,650" (#710) | #706 #707 #709 #718 #700 #710 | **A** |
 | **C7** | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
 | **C8** | Referrals | Built (#663) | The free month can be farmed: refund, reset, duplicate codes (#680) | #680 | E |
 
