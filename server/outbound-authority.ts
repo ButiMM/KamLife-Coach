@@ -95,7 +95,12 @@ export async function enforceOutboundTruth(
   // …and their own stored target or goal weight as a bare figure (#710): "1,650" carries no unit, but it is her target.
   const own = [recipientUser?.calorieTarget, recipientUser?.baselineCalorieTarget, recipientUser?.targetWeightKg]
     .map(Number).filter(n => n > 0);
-  const saysOwnFigure = own.length > 0 && (body.match(/\d[\d,\s]*\d|\d/g) || []).some(t => own.includes(Number(t.replace(/[,\s]/g, ""))));
+  // A figure with its own other unit is not her target: "R65" (a price), "65 minutes", "1,650 steps" (Codex P2 on #726).
+  const saysOwnFigure = own.length > 0 && [...body.matchAll(/\d[\d, ]*\d|\d/g)].some(m => {
+    const before = body.slice(Math.max(0, m.index! - 3), m.index!), after = body.slice(m.index! + m[0].length);
+    if (/(?:^|[^A-Za-z])R\s?$|[\d.:]$/.test(before) || /^(?:[.:]\d|\s*(?:min|minutes?|hrs?|hours?|steps?|reps?|sets?|km|m\b|ml|l\b|litres?|liters?|%|x\b|rand|days?|weeks?))/i.test(after)) return false;
+    return own.includes(Number(m[0].replace(/[, ]/g, "")));
+  });
   if (withheld && !body.includes(NUMBERS_PAUSED)
       && (heldFigureIn(body) || saysOwnFigure)) {
     return { ok: false, reason: "numbers_withheld", detail: `${withheld}: ${body.slice(0, 60)}`,
