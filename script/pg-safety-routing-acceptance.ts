@@ -292,6 +292,8 @@ for (const [lang, text] of [
   const r = await say(C, text);
   chk(modelCalls === 0 && /0800 567 567/.test(r) && (await escalationReasons(C)).includes("crisis"), `${lang}: passive ideation gets the helplines, no model, and the founder is told`, `${modelCalls} calls | ${await escalationReasons(C)} | ${r.slice(0, 120)}`);
 }
+{ const D = await client("Crisis Device"); const r = await say(D, "My Fitbit wil nie meer wakker word nie, maar dit is vol gelaai.");
+  chk(!/0800 567 567/.test(r) && !(await escalationReasons(D)).includes("crisis"), "Afrikaans: a device that won't wake up is not a crisis", `${await escalationReasons(D)} | ${r.slice(0, 120)}`); }
 
 await pool.end().catch(() => {});
 REAL(`\npg-safety-routing-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);

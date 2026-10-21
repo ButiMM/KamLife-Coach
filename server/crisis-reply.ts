@@ -37,7 +37,7 @@ export const CRISIS_PHRASES = [
   "kungcono ndingabikho", "andisafuni nokuvuka", "ndifuna ukunyamalala", // isiXhosa
   "ha ke sa batla ho tsoha", "ke batla ho nyamela", // Sesotho
   "ga ke sa batle go tsoga", "ke batla go nyelela", // Setswana
-  "wil nie meer wakker word nie", "ek wil net verdwyn", "beter as ek nie hier is nie", // Afrikaans
+  "ek wil nie meer wakker word nie", "ek wil net verdwyn", "beter as ek nie hier is nie", // Afrikaans (first person: "my Fitbit wil nie meer wakker word nie" is a device)
 ];
 
 /** `m` is the lowercased message the handler pipeline already computed. */
