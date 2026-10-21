@@ -152,6 +152,7 @@ interface TurnScope {
     sessionsWindow?: number | null;
     sessionsWindowDays?: number | null;
     foodDaysWindow?: number | null;
+    foodDaysWindowDays?: number | null;
     /**
      * PRESCRIPTION PROVENANCE (2026-08-21). The canonical action this turn decided, if any, and
      * whether the reply was authored by a model path. A behaviour-changing directive in
@@ -497,8 +498,9 @@ async function reconcileTurnReply(scope: TurnScope, reply: string): Promise<stri
   // …and a logged-days claim gets its count the same way (#682): "You logged food on 6 days this week" is checked.
   if (scope.evidence?.modelAuthored && scope.evidence.foodDaysWindow == null) {
     const { loggedDaysClaimed } = await import("../brain/reply-verifier");
-    if (loggedDaysClaimed(draft) !== null) {
-      try { turnEvidence({ foodDaysWindow: await (await import("../day-ledger")).foodDaysSince(scope.userId, 7) }); }
+    const claim = loggedDaysClaimed(draft); // read over the claim's own window: "10 of the last 14 days" (#728 review)
+    if (claim !== null) {
+      try { turnEvidence({ foodDaysWindow: await (await import("../day-ledger")).foodDaysSince(scope.userId, claim.window), foodDaysWindowDays: claim.window }); }
       catch (e: any) { console.error(`[FOOD_DAYS_EVIDENCE] could not read the count, refusing the claim: ${e?.message || e}`); }
     }
   }

@@ -52,8 +52,9 @@ export interface VerifierFacts {
     sessionsWindow?: number | null;
     /** The window that count covers. Without it the number has no context to be checked in. */
     sessionsWindowDays?: number | null;
-    /** Days with food logged in the last 7, from mealLogs, when the boundary read it (#682). */
+    /** Days with food logged in `foodDaysWindowDays`, from mealLogs, when the boundary read it (#682). */
     foodDaysWindow?: number | null;
+    foodDaysWindowDays?: number | null;
     /** The coaching decision this turn actually made, from chooseAction. */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
@@ -479,24 +480,26 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
  * canonical-decision boundary above already withholds model prose entirely on a decision turn.
  * ──────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** "You logged food on N days" — how many days the client logged, in model prose (#682). null when the reply claims none. */
-export function loggedDaysClaimed(reply: string): number | null {
-  const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, every: 7, all: 7 };
-  const m = (reply || "").match(/\b(?:logged|tracked)\s+(?:your\s+)?(?:food|meals?|everything|something)?\s*(?:on\s+|for\s+)?(\d+|one|two|three|four|five|six|seven|every|all)\s+(?:of\s+(?:the\s+)?(?:last\s+)?\w+\s+)?days?\b|\b(\d+|one|two|three|four|five|six|seven)\s+(?:of\s+(?:the\s+)?(?:last\s+)?\w+\s+)?days?\s+(?:of\s+)?(?:logged|logging|tracked|tracking)\b/i);
+/** "You logged food on N days (of the last M)" — the food-logged days a model claims, and over which window (#682).
+ *  null when the reply claims none. The food noun is required: "3 days of training" is the session rule's (#728 review). */
+export function loggedDaysClaimed(reply: string): { days: number; window: number } | null {
+  const num = (w: string) => /^\d+$/.test(w) ? Number(w) : ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, every: 7, all: 7, fourteen: 14 } as Record<string, number>)[w.toLowerCase()];
+  const N = "(\\d+|one|two|three|four|five|six|seven|every|all)", OF = "(?:\\s+of\\s+(?:the\\s+)?(?:last|past)\\s+(\\d+|seven|fourteen))?";
+  const m = (reply || "").match(new RegExp(`\\b(?:logged|tracked)\\s+(?:your\\s+)?(?:food|meals?|eating)\\s+(?:on\\s+|for\\s+)?${N}${OF}\\s+days?\\b|\\b${N}${OF}\\s+days?\\s+of\\s+(?:food|meal)\\s+(?:logging|tracking|logs?)\\b`, "i"));
   if (!m) return null;
-  const n = (m[1] || m[2]).toLowerCase();
-  return /^\d+$/.test(n) ? Number(n) : words[n] ?? null;
+  const days = num(m[1] || m[3]), window = m[2] || m[4] ? num(m[2] || m[4]) : 7;
+  return days === undefined || window === undefined ? null : { days, window };
 }
 
 /** A count of logged days in model prose must be the count we hold, as a session count must be (#682). */
 function verifyLoggedDays(reply: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   if (!evidence?.modelAuthored) return { ok: true };
-  const claimed = loggedDaysClaimed(reply);
-  if (claimed === null) return { ok: true };
-  const held = evidence?.foodDaysWindow;
-  if (typeof held === "number" && claimed === held) return { ok: true };
+  const claim = loggedDaysClaimed(reply);
+  if (claim === null) return { ok: true };
+  const held = evidence?.foodDaysWindow, heldDays = Number(evidence?.foodDaysWindowDays) || 7;
+  if (typeof held === "number" && heldDays === claim.window && claim.days === held) return { ok: true };
   return { ok: false, violation: typeof held === "number"
-    ? `Your reply says the client logged food on ${claimed} day(s), but the record holds ${held} in the last 7 days. Say the number we hold, or say nothing about the count.`
+    ? `Your reply says the client logged food on ${claim.days} day(s) of the last ${claim.window}, but the record holds ${held} in the last ${heldDays} days. Say the number we hold, or say nothing about the count.`
     : "Your reply states how many days the client logged food, and there is no count on this turn to support it. Answer without the count." };
 }
 

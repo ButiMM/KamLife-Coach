@@ -5722,6 +5722,10 @@ test("verifier: \"you logged food on 6 days\" is checked against the record", as
   assert.equal(v("You logged food on 6 days this week.", { evidence: { modelAuthored: true, foodDaysWindow: 2 } } as any).ok, false, "6 against a record of 2");
   assert.equal(v("You logged food on 6 days this week.", { evidence: { modelAuthored: true } } as any).ok, false, "no count held: no basis for the number");
   assert.equal(v("You logged your meals on 3 of the last 7 days.", { evidence: { modelAuthored: true, foodDaysWindow: 3 } } as any).ok, true, "the held number may be said");
+  // #728 review: the count is read over the claim's own window, and a claim must name food.
+  assert.equal(v("You logged food on 10 of the last 14 days", { evidence: { modelAuthored: true, foodDaysWindow: 10, foodDaysWindowDays: 14 } } as any).ok, true, "10 of 14, held over 14");
+  const { loggedDaysClaimed } = await import("../server/brain/reply-verifier");
+  assert.equal(loggedDaysClaimed("You logged 3 days of training this week"), null, "training days are not a food count");
 });
 
 test("scope: off-domain asks are declined without a model", () => {
