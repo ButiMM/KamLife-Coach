@@ -341,6 +341,8 @@ for (const text of ["I'm on metformin. Can I take it slow and walk after supper?
   chk(/clearance/i.test(d), "…\"I haven't seen my doctor yet; show me today's workout\" is still held", d.slice(0, 160));
   const k = await say(H, "I walked 5k this morning, what's my workout today?"); // #722: a steps word does not open the gate
   chk(/clearance/i.test(k) && !/warm-up|sets|reps/i.test(k), "…\"I walked 5k this morning, what's my workout today?\" is still held, and no session is sent", k.slice(0, 160));
+  for (const food of ["Log my meal: 2 eggs before today's workout", "What should I eat before training?"]) { // #724 review: food around a session is food
+    const f = await say(H, food); chk(!/clearance for exercise/i.test(f), `…"${food}" is food, not met with the clearance ask`, f.slice(0, 160)); }
   const { readHeldConstraints } = await import("../server/held-constraints");
   chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training");
   // #717 ATTACK @ 4bcac7e: a negated clearance is not the clearance.
