@@ -5716,6 +5716,18 @@ test("client record: a quote or reported speech is not the client's own fact", a
 
 // #321: scope is enforced in code. An ask FOR an off-domain thing is declined without a model;
 // a mention of one inside a coaching message is not an ask.
+// #682: a logged-days count in model prose is the count we hold, as a session count is.
+test("verifier: \"you logged food on 6 days\" is checked against the record", async () => {
+  const { verifyBrainReply: v } = await import("../server/brain/reply-verifier");
+  assert.equal(v("You logged food on 6 days this week.", { evidence: { modelAuthored: true, foodDaysWindow: 2 } } as any).ok, false, "6 against a record of 2");
+  assert.equal(v("You logged food on 6 days this week.", { evidence: { modelAuthored: true } } as any).ok, false, "no count held: no basis for the number");
+  assert.equal(v("You logged your meals on 3 of the last 7 days.", { evidence: { modelAuthored: true, foodDaysWindow: 3 } } as any).ok, true, "the held number may be said");
+  // #728 review: the count is read over the claim's own window, and a claim must name food.
+  assert.equal(v("You logged food on 10 of the last 14 days", { evidence: { modelAuthored: true, foodDaysWindow: 10, foodDaysWindowDays: 14 } } as any).ok, true, "10 of 14, held over 14");
+  const { loggedDaysClaimed } = await import("../server/brain/reply-verifier");
+  assert.equal(loggedDaysClaimed("You logged 3 days of training this week"), null, "training days are not a food count");
+});
+
 test("scope: off-domain asks are declined without a model", () => {
   for (const m of [
     "Can you help me write my CV for a job application?", "Should I put my savings into bitcoin this month?",

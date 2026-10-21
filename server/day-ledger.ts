@@ -750,6 +750,14 @@ export async function sessionsSince(userId: string, days: number): Promise<numbe
   return Number((row as any)?.n || 0);
 }
 
+/** Days with at least one meal logged in the last `days` days, counted by SAST day (#682: the count a "you logged
+ *  food on 6 days" claim is checked against). */
+export async function foodDaysSince(userId: string, days: number): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`COUNT(DISTINCT ${sastDayBucketSql(mealLogs.loggedAt)})::int` }).from(mealLogs)
+    .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, new Date(Date.now() - days * 86_400_000))));
+  return Number((row as any)?.n || 0);
+}
+
 /** This SAST Monday–Sunday, not a rolling 7 days. */
 export async function sessionsThisCalendarWeek(userId: string, at?: Date | number): Promise<number> {
   const { sastWeekStart } = await import("./sast");
