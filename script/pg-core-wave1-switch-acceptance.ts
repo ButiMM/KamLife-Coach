@@ -438,6 +438,11 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   const r0 = await count(TESTER); await say(TESTER, "I had samp and beans for supper"); const r1 = await count(TESTER);
   const rs = await say(TESTER, "I had samp and beans for supper");
   chk(r1 === r0 + 1 && await count(TESTER) === r1 && /already in your log/i.test(rs) && !/chakalaka|solid meal/i.test(rs), "a resent meal is not logged twice and gets a plain \"already in your log\", not the old receipt", rs.slice(0, 200));
+  // #702: a resend that carries more than the meal is answered whole, told the meal is already on the ledger.
+  await say(TESTER, "I have diabetes. Had a kota for lunch"); (globalThis as any).__lastCompose = "";
+  const k0 = await count(TESTER), kr = await say(TESTER, "I have diabetes. Had a kota for lunch");
+  chk(await count(TESTER) === k0 && kr.includes(NEW) && kr.trim() !== "Got it — that's already in your log ✅" && /ALREADY ON THE LEDGER/.test((globalThis as any).__lastCompose || ""),
+    "a resent kota with a diabetes disclosure: no second row, and the coach answers the whole message (#702)", kr.slice(0, 200));
   const y0 = await count(TESTER); await say(TESTER, "I had pap and spinach yesterday"); const yr = await say(TESTER, "I had pap and spinach yesterday");
   chk(await count(TESTER) === y0 + 1 && /already in your log/i.test(yr) && !/today/i.test(yr), "a resent \"…yesterday\" meal is not called today's (#628 review)", `${y0}→${await count(TESTER)} | ${yr.slice(0, 160)} | ${JSON.stringify((await pool.query("SELECT raw_message, logged_at::date d FROM meal_logs m JOIN users u ON u.id=m.user_id WHERE u.phone_number=$1 AND raw_message ILIKE $2", [TESTER, "%spinach%"])).rows)}`);
   const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
