@@ -521,10 +521,16 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // No rollback since 14 Oct (#568). A turn it could not read still reaches the doors below until they are deleted (batch 2).
   // MONEY IS A FLOOR, NOT A READ: "I'm cancelling my subscription" / "stop charging me" goes to the cancel and billing
   // flow below, never to the coach's words (the coach has no cancel action, so a cancel in a sentence cancelled nothing).
-  const core = await import("./core/coach"); const front = feedbackReply === null && trainingLoopOutcome === null && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m) && !looksLikeBillingOrCancel(m) && !(await import("./handlers/safety")).asksForTimedPause(m) // a timed pause is the lifecycle owner's
-    ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
+  const core = await import("./core/coach"); const frontOwns = feedbackReply === null && trainingLoopOutcome === null && !mediaUrl && !user.awaitingInputType && !core.isExactCommand(m) && !looksLikeBillingOrCancel(m) && !(await import("./handlers/safety")).asksForTimedPause(m); // a timed pause is the lifecycle owner's
+  const front = frontOwns ? await core.frontTurn({ phone, message, user, sourceMessageId, ongoing: recentlyActive(user), evidence: turnEvidence }) : null;
   if (front?.reply && front.wrote) turnEvidence({ conversationalOnly: true }); // #590: an after-log turn is the new coach's words only; the ladder speaks once a day, scheduled
   if (front?.reply) return tag(front.reply, front.src);
+  // THE REPORT FLOOR (#568 batch 2): the coach could not read the turn, so a weigh-in, steps, water, sleep or a finished
+  // session is still saved by the tool that owns it, in the tool's own words. A plate is not the floor's: while
+  // the food door below lives, a turn carrying food goes there whole, and so does a catch-up across several days (the
+  // backfill door dates each one).
+  const floorSaved = frontOwns && !turnFacts.hasFoodReport && !attributeMultiDayReport(message).hasMultipleDays ? await (await import("./understanding/report-floor")).reportFloor({ phone, message, m, user, sourceMessageId }) : null;
+  if (floorSaved) return closeCoachingTurn(floorSaved);
   // CUT 1 — ONE TURN COMMITS EVERY EVENT. The facts were parsed from the client's raw text
   // above, before the rewriter. If the note carries two or more, no handler below may end the
   // turn: each COMMITS what it did and control continues, and one composer builds one reply.

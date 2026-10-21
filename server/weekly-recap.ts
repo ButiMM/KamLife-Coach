@@ -373,7 +373,7 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
 
       // NOTE: the week card is NOT sent here anymore (2026-07-12). The Sunday report
       // job (scheduler/jobs/weekly.ts) already sends the *Week Report Card* text with
-      // all the numbers — the recap engine sending buildWeekCard too meant the client
+      // all the numbers — the recap engine sending a week card too meant the client
       // got the same stats TWICE plus the voice note reading them a third time. The
       // voice note is now the ONLY thing this engine sends: one personal bubble.
 
