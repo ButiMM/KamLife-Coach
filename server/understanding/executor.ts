@@ -51,6 +51,7 @@ export interface ExecuteContext {
 export interface ExecuteResult {
   performed: boolean;   // did we actually write state?
   unwritten?: boolean;  // the owner answered but wrote nothing (#593): `reply` is its own words, never a "logged"
+  held?: boolean;       // …because it is a resend already on the ledger: evidence for the reply, not the whole reply (#702)
   confirmed: boolean;   // did we ask for confirmation instead of writing?
   skipped: boolean;     // idempotency: this exact action already ran (a retry)
   reply: string;        // what Coach K relays to the client
@@ -111,7 +112,7 @@ function confirmQuestion(action: CoachAction, user: any): string {
   }
 }
 
-class NotWritten extends Error { constructor(readonly ownerReply: string) { super("not written"); } }
+class NotWritten extends Error { constructor(readonly ownerReply: string, readonly held = false) { super("not written"); } }
 
 export async function executeAction(action: CoachAction, ctx: ExecuteContext): Promise<ExecuteResult> {
   // NUMBER BRAKE — a step count, weight or water volume the client never said is not a log,
@@ -152,7 +153,7 @@ export async function executeAction(action: CoachAction, ctx: ExecuteContext): P
     }
     return { ...base, performed: writesState(action.type), reply: reply || "" };
   } catch (e) {
-    if (e instanceof NotWritten) return { ...base, unwritten: true, reply: e.ownerReply };
+    if (e instanceof NotWritten) return { ...base, unwritten: true, reply: e.ownerReply, ...(e.held ? { held: true } : {}) };
     console.error(`[EXECUTOR] ${action.type} failed:`, (e as Error)?.message || e);
     return { ...base, reply: "Something went wrong on my side — send that again and I'll get it.", error: String((e as Error)?.message || e) };
   }
@@ -267,7 +268,7 @@ async function mealTool(action: Extract<CoachAction, { type: "LOG_MEAL" }>, ctx:
   if (turnRecording() && !turnMutations().slice(before).some(x => /^(?:INSERT|UPDATE) meal\b/.test(x))) {
     lastCardMarker = "";
     // A resend is already on the ledger: say so plainly, as a resent photo is answered (founder, 7 Oct), not the old receipt.
-    if (turnMutations().slice(before).some(x => x.startsWith("HELD meal resend"))) throw new NotWritten("Got it — that's already in your log ✅"); // not "today's": "I had pap yesterday" twice (#628 review)
+    if (turnMutations().slice(before).some(x => x.startsWith("HELD meal resend"))) throw new NotWritten("Got it — that's already in your log ✅", true); // not "today's": "I had pap yesterday" twice (#628 review)
     throw new NotWritten(String(discarded || "").replace(/\[[A-Z]+:[^\]]*\]/g, "").trim());
   }
   const refs: Record<string, string> = { mealName: String(action.foodText || "").slice(0, 60) };

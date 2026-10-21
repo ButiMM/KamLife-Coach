@@ -276,9 +276,9 @@ export function cardMeals(written: Array<{ name: string; sid: string }>, rows: A
 }
 
 async function logThroughExecutor(phone: string, message: string, actions: CoachAction[], confidence: number, sourceMessageId?: string):
-  Promise<{ performed: boolean; confirm: string | null; reply: string; card: string; user?: any }> {
+  Promise<{ performed: boolean; confirm: string | null; reply: string; card: string; user?: any; held?: string }> {
   const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-  const out = { performed: false, confirm: null as string | null, reply: "", card: "", user };
+  const out = { performed: false, confirm: null as string | null, reply: "", card: "", user, held: undefined as string | undefined };
   if (!user) return out;
   const [{ executeAction, setPendingConfirm }, { describeAction }, { deriveSourceId }, { logChat }] = await Promise.all([
     import("../understanding/executor"), import("../understanding/actions"), import("../understanding/live"), import("../handlers/chat-log")]);
@@ -287,7 +287,8 @@ async function logThroughExecutor(phone: string, message: string, actions: Coach
     const sid = `${sourceMessageId || deriveSourceId(user.id, message)}#${describeAction(action)}`;
     const exec = await executeAction(action, { user, phone, confidence, clientMessage: message, sourceMessageId: sid });
     await logChat(user.id, message, `${describeAction(action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip" : exec.error ? "error" : "noop"}`, "ENGINE_ACTION").catch(() => {});
-    if (exec.unwritten && exec.reply && !out.confirm) out.confirm = exec.reply; // the owner's own question: nothing is claimed
+    if (exec.held) out.held = exec.reply; // a resend already on the ledger: evidence for the reply (#702)
+    else if (exec.unwritten && exec.reply && !out.confirm) out.confirm = exec.reply; // the owner's own question: nothing is claimed
     // A READ ("what's my workout today?") is the owner's answer, shown as it is: it was dropped, and
     // the model answered without the programme (founder's Monday plan, item 4).
     if (!exec.performed && !exec.confirmed && !exec.unwritten && !exec.skipped && !exec.error && exec.reply && READS.has(action.type)) out.reply = [out.reply, exec.reply].filter(Boolean).join("\n\n");
@@ -419,7 +420,7 @@ const JUST_LOGGED = {
 } as const;
 
 /** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */
-export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food", user?: any): Promise<string | null> {
+export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food", user?: any, held = ""): Promise<string | null> {
   if (!coreWave2For(phone) || keepsReceipt(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
@@ -429,6 +430,7 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     const guard = user ? await (await import("../nutrition-guardrails")).nutritionGuardrailNudge(user) : "";
     if (guard) receipt = receipt.replace(guard.trim(), "");
     pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 900)}`;
+    if (held) pre.numbers += `\nALREADY ON THE LEDGER (a meal they sent before; nothing new was written for it this turn, so never say it was logged now): ${held}`;
     const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
@@ -789,8 +791,22 @@ async function runActions(p: { phone: string; message: string; user: any; source
   const logged = await logThroughExecutor(phone, message, acts, confidence, p.sourceMessageId);
   if (logged.confirm) return { reply: logged.card + [logged.reply, logged.confirm].filter(Boolean).join("\n\n"), src: "core front: confirm", wrote: false };
   const receipt = (logged.card + logged.reply).trim();
+  // A RESEND IS EVIDENCE, NOT THE REPLY (#702): "I have diabetes. Had a kota for lunch" after the kota was logged got only
+  // "already in your log". The fixed line answers the meal alone; anything more is composed, told nothing new was written.
+  if (!logged.performed && logged.held) {
+    const meal = acts.find(a => a.type === "LOG_MEAL") as Extract<CoachAction, { type: "LOG_MEAL" }> | undefined;
+    const rest = m.replace(String(meal?.foodText || "").toLowerCase(), " ").replace(/[^a-z\s]/g, " ")
+      .replace(/\b(?:i|i'?ve|had|ate|have|a|an|the|some|for|at|my|again|today|just|and|breakfast|lunch|dinner|supper|snack)\b/g, " ").trim();
+    const pre = rest ? await readPreTurn(phone, message) : null;
+    if (pre) pre.numbers += `\nALREADY ON THE LEDGER (a meal they sent before; nothing new was written this turn, so never say it was logged now): ${meal?.foodText || "this meal"}`;
+    const reply = pre ? (await compose(openai, pre, message, u))?.trim() : "";
+    return { reply: reply || logged.held, src: reply ? "core front" : "core front: held", wrote: false };
+  }
   if (!logged.performed) return receipt ? { reply: receipt, src: "core front: read", wrote: false } : null;
   const kind = acts.every(a => a.type === "LOG_STEPS") ? "steps" : acts.some(a => a.type === "LOG_MEAL") ? "food" : null;
-  const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user) : null;
-  return { reply: words || receipt, src: "core front", wrote: acts.some(a => writesState(a.type)) };
+  // …and beside a write ("had the kota again and walked 3000 steps") the resend still rides along, so the reply never
+  // calls the old meal new (#720 Codex P2).
+  const held = logged.held ? String((acts.find(a => a.type === "LOG_MEAL") as any)?.foodText || "this meal") : "";
+  const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user, held) : null;
+  return { reply: words || [receipt, logged.held].filter(Boolean).join("\n\n"), src: "core front", wrote: acts.some(a => writesState(a.type)) };
 }
