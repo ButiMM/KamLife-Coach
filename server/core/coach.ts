@@ -421,7 +421,7 @@ const JUST_LOGGED = {
 } as const;
 
 /** The new coach's reply to a turn whose fact the proven owner just wrote. null = keep the old receipt. */
-export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food", user?: any): Promise<string | null> {
+export async function afterLogReply(phone: string, message: string, receipt: string, kind: keyof typeof JUST_LOGGED = "food", user?: any, held = ""): Promise<string | null> {
   if (!coreWave2For(phone) || keepsReceipt(receipt)) return null;
   try {
     const pre = await readPreTurn(phone, message);
@@ -431,6 +431,7 @@ export async function afterLogReply(phone: string, message: string, receipt: str
     const guard = user ? await (await import("../nutrition-guardrails")).nutritionGuardrailNudge(user) : "";
     if (guard) receipt = receipt.replace(guard.trim(), "");
     pre.numbers += `\nJUST SAVED THIS TURN (already on the ledger above; never ask them to log it again): ${receipt.replace(/\[[A-Z]+:[^\]]*\]/g, "").replace(/\s+/g, " ").slice(0, 900)}`;
+    if (held) pre.numbers += `\nALREADY ON THE LEDGER (a meal they sent before; nothing new was written for it this turn, so never say it was logged now): ${held}`;
     const u: Understanding = { family: "report", wants: `${JUST_LOGGED[kind]}. Give no instruction or next step: the one next move is added after your words`, one_question: null, uncertainty: 0, actions: [] };
     const reply = (await compose(await openaiClient(), pre, message, u))?.trim();
     if (!reply) return null;
@@ -804,6 +805,9 @@ async function runActions(p: { phone: string; message: string; user: any; source
   }
   if (!logged.performed) return receipt ? { reply: receipt, src: "core front: read", wrote: false } : null;
   const kind = acts.every(a => a.type === "LOG_STEPS") ? "steps" : acts.some(a => a.type === "LOG_MEAL") ? "food" : null;
-  const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user) : null;
-  return { reply: words || receipt, src: "core front", wrote: acts.some(a => writesState(a.type)) };
+  // …and beside a write ("had the kota again and walked 3000 steps") the resend still rides along, so the reply never
+  // calls the old meal new (#720 Codex P2).
+  const held = logged.held ? String((acts.find(a => a.type === "LOG_MEAL") as any)?.foodText || "this meal") : "";
+  const words = kind ? await afterLogReply(phone, message, receipt, kind, logged.user, held) : null;
+  return { reply: words || [receipt, logged.held].filter(Boolean).join("\n\n"), src: "core front", wrote: acts.some(a => writesState(a.type)) };
 }

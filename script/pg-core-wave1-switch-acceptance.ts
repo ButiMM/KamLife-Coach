@@ -29,7 +29,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
     const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
-    const log586 = /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
+    const log586 = /^I had samp and beans for supper, and I walked 3000 steps$/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "samp and beans for supper", needsConfirmation: false }, { type: "LOG_STEPS", count: 3000 }] // #720
+      : /kota from the spaza/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "kota", needsConfirmation: false }] : /ndidle ipapa/i.test(msg) ? [{ type: "LOG_MEAL", foodText: "pap and meat", needsConfirmation: false }]
       : /recalculate everything|remove my last meal/i.test(msg) ? [{ type: "REMOVE_LAST_MEAL" }]
       : msg === LIST5 ? FIVE.map(([f, d]) => ({ type: "LOG_MEAL", foodText: f, retro: DOW(d), needsConfirmation: false }))
       : msg === LIST ? [{ type: "LOG_MEAL", foodText: "pap and wors", retro: DOW(2), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "eggs and toast", retro: DOW(1), needsConfirmation: false }, { type: "LOG_MEAL", foodText: "chicken and rice", retro: DOW(0), needsConfirmation: false }]
@@ -443,6 +444,11 @@ REAL("\n4b. WAVE 2, A1 + A5 + A8 + A12 — THE PROVEN WRITER LOGS, THE NEW COACH
   const k0 = await count(TESTER), kr = await say(TESTER, "I have diabetes. Had a kota for lunch");
   chk(await count(TESTER) === k0 && kr.includes(NEW) && kr.trim() !== "Got it — that's already in your log ✅" && /ALREADY ON THE LEDGER/.test((globalThis as any).__lastCompose || ""),
     "a resent kota with a diabetes disclosure: no second row, and the coach answers the whole message (#702)", kr.slice(0, 200));
+  // #720 Codex P2: a resend beside a write that happens (steps) still tells the coach the meal is old.
+  (globalThis as any).__lastCompose = "";
+  const s0 = await count(TESTER), sr = await say(TESTER, "I had samp and beans for supper, and I walked 3000 steps");
+  chk(await count(TESTER) === s0 && (/ALREADY ON THE LEDGER[^\n]*samp and beans/.test((globalThis as any).__lastCompose || "") || /already in your log/i.test(sr)),
+    "a resent meal beside a steps report: no second meal row, and the reply is told the meal was already on the ledger (#720)", `${s0}→${await count(TESTER)} | ${sr.slice(0, 200)}`);
   const y0 = await count(TESTER); await say(TESTER, "I had pap and spinach yesterday"); const yr = await say(TESTER, "I had pap and spinach yesterday");
   chk(await count(TESTER) === y0 + 1 && /already in your log/i.test(yr) && !/today/i.test(yr), "a resent \"…yesterday\" meal is not called today's (#628 review)", `${y0}→${await count(TESTER)} | ${yr.slice(0, 160)} | ${JSON.stringify((await pool.query("SELECT raw_message, logged_at::date d FROM meal_logs m JOIN users u ON u.id=m.user_id WHERE u.phone_number=$1 AND raw_message ILIKE $2", [TESTER, "%spinach%"])).rows)}`);
   const costRows = async () => Number((await pool.query("SELECT COUNT(*)::int n FROM gpt_costs g JOIN users u ON u.id = g.user_id WHERE u.phone_number = $1 AND g.feature = 'core'", [TESTER])).rows[0].n);
