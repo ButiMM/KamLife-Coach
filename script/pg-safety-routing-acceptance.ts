@@ -164,6 +164,13 @@ const P = await client("Bonolo Pregnant");
   const toC = (await pool.query("SELECT body FROM shadow_replies WHERE phone = $1 AND id > $2", [C.phone, s0])).rows.map((x: any) => x.body).join("\n");
   chk(/1800 kcal/.test(toC), "control: the same proactive brief reaches an ordinary client", `sent=${JSON.stringify(toC)}`);
   chk(!givesWeightLossTarget(toP), "a proactive calorie target never reaches a pregnant client", `sent=${JSON.stringify(toP)}`);
+  // #710: her own target as a bare figure, no unit, is still her target.
+  const s1 = await lastShadowId();
+  await sendWhatsApp(P.phone, "Your number for today: 1,800. You've got this!").catch(() => {});
+  await sendWhatsApp(C.phone, "Your number for today: 1,800. You've got this!").catch(() => {});
+  const bareP = (await pool.query("SELECT body FROM shadow_replies WHERE phone = $1 AND id > $2", [P.phone, s1])).rows.map((x: any) => x.body).join("\n");
+  const bareC = (await pool.query("SELECT body FROM shadow_replies WHERE phone = $1 AND id > $2", [C.phone, s1])).rows.map((x: any) => x.body).join("\n");
+  chk(/1,800/.test(bareC) && !/1[, ]?800/.test(bareP), "her own target as a bare \"1,800\" never reaches her (#710); the control still gets it", `P=${JSON.stringify(bareP)} C=${JSON.stringify(bareC)}`);
 }
 
 {

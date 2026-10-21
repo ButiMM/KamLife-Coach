@@ -65,7 +65,8 @@ export async function enforceOutboundTruth(
   recipientKey: string,
   text: string,
   /** The recipient's row, when the door already holds it — carries the durable illness state. */
-  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null;
+    calorieTarget?: number | null; baselineCalorieTarget?: number | null; targetWeightKg?: string | number | null } | null,
   /** Which door is asking. Rules 1 and 2 are about TRUTH and apply to both; rule 3 is about
    *  CADENCE and only ever made sense for the door nobody is waiting at. Defaults to proactive so
    *  an un-migrated caller keeps the behaviour it had. */
@@ -91,8 +92,12 @@ export async function enforceOutboundTruth(
   //    carried on sending both. Enforced HERE because both doors pass through here: one rule, every
   //    path. The promise sentence itself is exempt, or the refusal could never be delivered.
   const withheld = withheldContext(recipientUser?.lifeSituation);
+  // …and their own stored target or goal weight as a bare figure (#710): "1,650" carries no unit, but it is her target.
+  const own = [recipientUser?.calorieTarget, recipientUser?.baselineCalorieTarget, recipientUser?.targetWeightKg]
+    .map(Number).filter(n => n > 0);
+  const saysOwnFigure = own.length > 0 && (body.match(/\d[\d,\s]*\d|\d/g) || []).some(t => own.includes(Number(t.replace(/[,\s]/g, ""))));
   if (withheld && !body.includes(NUMBERS_PAUSED)
-      && heldFigureIn(body)) {
+      && (heldFigureIn(body) || saysOwnFigure)) {
     return { ok: false, reason: "numbers_withheld", detail: `${withheld}: ${body.slice(0, 60)}`,
       repair: lifeContextReply({ context: withheld, refer: true, demand: "pause" }) };
   }
@@ -304,7 +309,8 @@ export async function prepareOutbound(
   userId: string | null,
   recipientKey: string,
   text: string,
-  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null } | null,
+  recipientUser?: { profileNotes?: string | null; lifeSituation?: string | null; onboardingState?: string | null;
+    calorieTarget?: number | null; baselineCalorieTarget?: number | null; targetWeightKg?: string | number | null } | null,
 ): Promise<OutboundPrepared> {
   const { provenanceGate } = await import("./verifiers/response-gate");
   const { humanizeReply } = await import("./reply-hygiene");

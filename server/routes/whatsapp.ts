@@ -49,7 +49,7 @@ async function sendFinal(phone: string, text: string, media: string | string[] |
   let userId: string | null = null;
   let userRow: { id: string; profileNotes: string | null; lifeSituation: string | null } | null = null;
   try {
-    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation })
+    const rows = await db.select({ id: users.id, profileNotes: users.profileNotes, lifeSituation: users.lifeSituation , calorieTarget: users.calorieTarget, baselineCalorieTarget: users.baselineCalorieTarget, targetWeightKg: users.targetWeightKg })
       .from(users).where(eq(users.phoneNumber, phone)).limit(1);
     userRow = (rows[0] as any) ?? null;
     userId = userRow?.id ?? null;
