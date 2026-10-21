@@ -361,8 +361,10 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
       // The hold is set at onboarding for a heart condition, or by the acute floor after chest symptoms (#706).
       const why = conditions.includes("heart_condition") ? "your profile shows a heart condition" : "you told me about chest symptoms";
       const clearanceMsg = `${name}, ${why}. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
-      // Allow food/step/weight questions and crisis through
-      const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m);
+      // Allow food/step/weight questions and crisis through, unless the same message asks for training: "I walked 5k this
+      // morning, what's my workout today?" would reach the workout owner and get a session (#722).
+      const asksToTrain = (/\b(?:what'?s|what\s+is|show|send|give|start|today'?s|tomorrow'?s|next|can\s+i|should\s+i)\b[^.!?]{0,30}\b(?:workout|session|programme|program|training|exercise)\b|\b(?:workout|session|training)\s+(?:today|tomorrow|for\s+today)\b/i).test(m);
+      const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m) && !asksToTrain;
       if (!allowThrough) {
         await logChat(user.id, message, clearanceMsg, "HEART_GATE");
         return clearanceMsg;

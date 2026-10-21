@@ -339,6 +339,8 @@ for (const text of ["I'm on metformin. Can I take it slow and walk after supper?
   // #717 review: naming a doctor is not the clearance, and every scheduled reader holds training.
   const d = await say(H, "I haven't seen my doctor yet; show me today's workout");
   chk(/clearance/i.test(d), "…\"I haven't seen my doctor yet; show me today's workout\" is still held", d.slice(0, 160));
+  const k = await say(H, "I walked 5k this morning, what's my workout today?"); // #722: a steps word does not open the gate
+  chk(/clearance/i.test(k) && !/warm-up|sets|reps/i.test(k), "…\"I walked 5k this morning, what's my workout today?\" is still held, and no session is sent", k.slice(0, 160));
   const { readHeldConstraints } = await import("../server/held-constraints");
   chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training");
   // #717 ATTACK @ 4bcac7e: a negated clearance is not the clearance.
