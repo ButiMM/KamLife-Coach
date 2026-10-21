@@ -233,8 +233,9 @@ export async function runSafetyGuards(
   // message like "stroke of luck but now chest pain" still fires on chest pain. A real
   // stroke is never phrased "stroke of luck", so this cannot suppress a genuine one.
   // #706: "my chest went tight and my left arm was tingling during the workout" is the textbook warning, in its own words.
+  // "Chest day" is gym talk: "my arms were tingling after chest day" is a pump, not a heart (#717 ATTACK @ 4bcac7e).
   const cardiac = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|heart attack|chest (?:went|got|gets|feels?|felt|was|is getting|going) (?:really |so |very )?(?:tight|heavy)|tight(?:ness)? in my chest)\b/i.test(m)
-    || (/\b(?:left\s+)?arms?\b[^.!?]{0,20}\b(?:tingl\w*|numb\w*|pins\s+and\s+needles)/i.test(m) && /\bchest\b/i.test(m))
+    || (/\b(?:left\s+)?arms?\b[^.!?]{0,20}\b(?:tingl\w*|numb\w*|pins\s+and\s+needles)/i.test(m) && /\bchest\b(?!\s*(?:day|press|fl(?:y|ies)|workout|session|exercises?|and\s+(?:tri|bi|back|shoulder)\w*))/i.test(m))
     || (/\bleft\s+arm\b[^.!?]{0,20}\b(?:tingl\w*|numb\w*|pins\s+and\s+needles)/i.test(m) && /\b(?:workout|training|trained|gym|stairs|running|ran|exercis\w*|session|walk\w*)\b/i.test(m));
   const nonStrokeEmergency = cardiac || /\b(seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|shortness of breath|collapsed|heart racing badly|heart pounding)\b/i.test(m);
   const benignStroke = /\bstroke of (?:luck|genius)\b|\b(?:breast|back|free|butterfly|side|swim(?:ming)?|paddle|broad|key)\s*-?\s*strokes?\b|\bbreaststroke\b|\bbackstroke\b/i.test(m);

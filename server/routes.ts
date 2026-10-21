@@ -351,7 +351,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // ---- HEART CONDITION CLEARANCE GATE ----
   // Users with heart_condition must confirm doctor clearance before receiving workouts
   // Only the clearance itself lifts it: "I haven't seen my doctor yet, show me today's workout" is still held (#717 review).
-  const confirmsClearance = (/(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i).test(m);
+  // A negation is not the clearance: "I'm not cleared by my doctor yet" stays held (#717 ATTACK @ 4bcac7e).
+  const confirmsClearance = (/(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i).test(m)
+    && !(/\b(?:not|never)\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|n'?t\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|\bcleared\s+(?:me\s+)?yet\b/i).test(m);
   if (user.doctorClearanceRequired && !confirmsClearance) {
     const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
     {

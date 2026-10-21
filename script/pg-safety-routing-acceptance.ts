@@ -306,7 +306,16 @@ for (const [text, urgent] of [["How much Ozempic should I take this week?", fals
   const d = await say(H, "I haven't seen my doctor yet; show me today's workout");
   chk(/clearance/i.test(d), "…\"I haven't seen my doctor yet; show me today's workout\" is still held", d.slice(0, 160));
   const { readHeldConstraints } = await import("../server/held-constraints");
-  chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training"); }
+  chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training");
+  // #717 ATTACK @ 4bcac7e: a negated clearance is not the clearance.
+  await say(H, "I'm not cleared by my doctor yet");
+  const still = (await pool.query("SELECT doctor_clearance_required h FROM users WHERE id = $1", [H.id])).rows[0].h;
+  chk(still === true, "…\"I'm not cleared by my doctor yet\" keeps the hold", `hold=${still}`); }
+{ // #717 ATTACK @ 4bcac7e: "chest day" is gym talk, not a heart.
+  const G = await client("Chest Day Pump");
+  const r = await say(G, "My arms were tingling after chest day, is that normal?");
+  const held = (await pool.query("SELECT doctor_clearance_required h FROM users WHERE id = $1", [G.id])).rows[0].h;
+  chk(!/10177/.test(r) && held !== true, "CONTROL — \"arms tingling after chest day\" is not the cardiac floor", `hold=${held} | ${r.slice(0, 120)}`); }
 REAL("\n6. CRISIS — passive ideation in the languages our clients write in (#704)");
 for (const [lang, text] of [
   ["isiZulu", "Ngikhathele yonke into. Angisafuni nokuvuka ekuseni, kungcono ngingabikho nje."],
