@@ -85,8 +85,8 @@ run_case "choosing a medicine is not an unsafe request" server/medication-contex
 
 # 4. A LIFE EVENT THAT MENTIONS AN OFF-TOPIC THING IS DECLINED — "update my CV so I skipped gym".
 run_case "coaching words do not outrank an off-domain mention" server/understanding/domain-guard.ts \
-  ' || !isObviouslyInDomain(t))) return' \
-  ' || true)) return' || failed=$((failed + 1))
+  '|| !isObviouslyInDomain(t.replace(' \
+  '|| true || !isObviouslyInDomain(t.replace(' || failed=$((failed + 1)) # re-anchored (#727): the ask is judged without the vocative
 
 restore_case
 if [[ $failed -ne 0 ]]; then
