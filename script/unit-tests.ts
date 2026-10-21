@@ -5324,6 +5324,9 @@ test("#692: money back only as a request; a topic pause is not a pause; a writte
   assert.equal(pauseDaysFrom("stop messaging me for 2 weeks"), 14);
   assert.equal(pauseDaysFrom("stop messaging me for a month"), 30);
   assert.equal(pauseDaysFrom("stop messaging me until Monday", new Date("2026-10-20T10:00:00Z")), 6);
+  assert.equal(pauseDaysFrom("stop messaging me until the end of the month", new Date("2026-10-20T10:00:00Z")), 11); // #693
+  assert.equal(pauseDaysFrom("stop messaging me until the 5th", new Date("2026-10-20T10:00:00Z")), 16);
+  assert.equal(pauseDaysFrom("stop messaging me until the 25th", new Date("2026-10-20T10:00:00Z")), 5);
 });
 
 test("guardrails: 'I hear you' scrub never bites into 'your' (the 'r frustration' bug)", () => {

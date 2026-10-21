@@ -1588,5 +1588,14 @@ export function pauseDaysFrom(m: string, now: Date = new Date()): number {
     const diff = (WEEKDAYS.indexOf(until[1].toLowerCase()) - sastDay + 7) % 7;
     return diff === 0 ? 7 : diff;
   }
+  // "until the end of the month", "until the 5th" (#693): counted from today in SAST, capped at 30 by the caller.
+  const [y, mo, d] = sastDayKey(now).split("-").map(Number);
+  if ((/\buntil\s+(?:the\s+)?end\s+of\s+(?:the|this)\s+month\b/i).test(m)) return Math.max(1, new Date(Date.UTC(y, mo, 0)).getUTCDate() - d);
+  const nth = m.match(/\buntil\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b/i);
+  if (nth && Number(nth[1]) >= 1 && Number(nth[1]) <= 31) {
+    const day = Number(nth[1]);
+    const target = day > d ? Date.UTC(y, mo - 1, day) : Date.UTC(y, mo, day); // a date already past is next month's
+    return Math.round((target - Date.UTC(y, mo - 1, d)) / 86_400_000);
+  }
   return 7;
 }
