@@ -256,7 +256,7 @@ export async function runMorningCheckin(): Promise<void> {
           }, {
             hour: 7,
             foodDayClosed: held.foodDayClosed,
-            trainingDeclined: held.trainingDeclined,
+            trainingDeclined: held.trainingDeclined || client.doctorClearanceRequired === true, // no training until a doctor clears them (#706)
             trainingAwaitingOutcome: !!openTraining,
           });
           decisionLine = decision.line;

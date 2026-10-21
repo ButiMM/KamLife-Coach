@@ -352,9 +352,11 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   // Users with heart_condition must confirm doctor clearance before receiving workouts
   if (user.doctorClearanceRequired && !/(doctor|cleared|clearance|got clearance|doctor said|my doctor|spoke to doctor|physician|cardiologist)/i.test(m)) {
     const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
-    if (conditions.includes("heart_condition")) {
+    {
       const name = getDisplayName(user) || "there";
-      const clearanceMsg = `${name}, your profile shows a heart condition. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
+      // The hold is set at onboarding for a heart condition, or by the acute floor after chest symptoms (#706).
+      const why = conditions.includes("heart_condition") ? "your profile shows a heart condition" : "you told me about chest symptoms";
+      const clearanceMsg = `${name}, ${why}. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
       // Allow food/step/weight questions and crisis through
       const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m);
       if (!allowThrough) {
