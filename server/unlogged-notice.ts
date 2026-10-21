@@ -82,7 +82,9 @@ const NOISE = new Set([
  * it does not decide whether to log, and it never suppresses a reply.
  */
 export function carriesFeelingClause(text: string): boolean {
-  return /\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\b/i.test(text || "");
+  return /\b(i feel|i'm feeling|im feeling|i felt|feel like|feeling like|i think i|ruined|failed|guilty|ashamed|disappointed|gave up|giving up|fell off|messed up|stressing me|so stressed|really stressed|depressed|anxious|can'?t cope)\b/i.test(text || "")
+    // …in the languages our clients write in (#683): "Ek is hopeloos" after a packet of Simba is the same shame.
+    || /\b(ek voel|ek is hopeloos|ek skaam my|ek het (?:alles )?opgemors|ek het misluk|ek gee op|ngiyahluleka|ngiyaphoxeka|ngizizwa kabi|nginamahloni|ndiyaphoxeka|ndineentloni|ndiziva kakubi|ndiyasilela|ke tlhabilwe ke ditlhong|ke ikutlwa ke le maswe|ga ke na tsholofelo|ke palelwa|ke hlajwa ke dihlong|ke ikutlwa hampe|ha ke na tshepo|ke hlolehile)\b/i.test(text || "");
 }
 
 /**
