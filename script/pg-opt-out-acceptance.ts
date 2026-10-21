@@ -165,6 +165,7 @@ const PHRASES = [
   "Ke kopa o se ka wa nthomelela melaetsa gape.",           // Setswana
   "Ke kopa o se ke wa nthomella melaetsa hape.",            // Sesotho
   "Moenie vir my boodskappe stuur nie, asseblief.",         // Afrikaans
+  "Ndicela ungandithumeleli imiyalezo yenu",                // isiXhosa "your messages": every message, not a topic (#723 review)
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
