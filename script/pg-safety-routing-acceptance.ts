@@ -239,6 +239,34 @@ for (const [text, extra] of ED_CASES) {
     JSON.stringify(await escalationReasons(O)));
 }
 
+// #707: purging after a meal, in the language she writes in: the same hold, no model, no meal written.
+for (const [lang, text] of [
+  ["Afrikaans", "Ek het weer alles uitgegooi na aandete. Ek wil net hê die skaal moet sak."],
+  ["isiZulu", "Ngizihlanzisa emva kokudla ukuze ngehle isisindo."],
+  ["Setswana", "Ke a kgatsha morago ga go ja gore ke fokotse boima."],
+  ["Sesotho", "Ke a hlatsa ka mor'a ho ja hore ke theole boima."],
+] as const) {
+  const L = await client(`Purging ${lang}`);
+  modelCalls = 0;
+  const r = await say(L, text);
+  const meals = Number((await pool.query("SELECT count(*) n FROM meal_logs WHERE user_id = $1", [L.id])).rows[0].n);
+  chk((await situation(L)) === "disordered_eating" && modelCalls === 0 && meals === 0 && givesEdHelpline(r) && !/kcal|calorie/i.test(r), `${lang}: purging after a meal sets the hold, with no model, no meal row and the helpline`, `life_situation=${await situation(L)} | ${modelCalls} calls | meals=${meals} | ${r.slice(0, 120)}`);
+}
+{ // #715 review: her own words beside an English relative are still hers; sweets thrown in the bin are not a disclosure.
+  const O = await client("Purging Own");
+  await say(O, "Ngizihlanzisa emva kokudla, my sister is worried");
+  chk((await situation(O)) === "disordered_eating", "isiZulu disclosure beside \"my sister\" is still the client's own", `life_situation=${await situation(O)}`);
+  const B = await client("Sweets Out");
+  await say(B, "Ek het al die soetgoed uitgegooi na aandete");
+  chk((await situation(B)) !== "disordered_eating", "CONTROL — \"ek het al die soetgoed uitgegooi\" (threw the sweets out) is not a disclosure", `life_situation=${await situation(B)}`);
+  // #715 ATTACK @ b19441a: vomiting with flu is illness, and "ngemuva" is the usual isiZulu spelling.
+  const F = await client("Flu After Supper");
+  await say(F, "Ek het opgegooi na aandete, ek het griep");
+  chk((await situation(F)) !== "disordered_eating", "CONTROL — \"ek het opgegooi na aandete, ek het griep\" (flu) is not a disclosure", `life_situation=${await situation(F)}`);
+  const Z = await client("Purging Ngemuva");
+  await say(Z, "ngiyahlanza ngemuva kokudla");
+  chk((await situation(Z)) === "disordered_eating", "isiZulu \"ngiyahlanza ngemuva kokudla\" sets the hold", `life_situation=${await situation(Z)}`); }
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3. ONBOARDING — \"are you currently pregnant…?\" must have a pregnant answer");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
