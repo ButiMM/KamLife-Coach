@@ -18,13 +18,12 @@ import type OpenAI from "openai";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { users, coreShadow, turnLedger, clientEvents, chatHistory, mealLogs } from "@shared/schema";
-import { assertAiOnline } from "../ai-offline";
+import { MODEL, assertAiOnline } from "../ai-offline";
 import { validateActions, type CoachAction } from "../understanding/actions";
 import { ONE_VOICE } from "../coach-prompt";
 import { withheldContext, heldFigureIn } from "../life-context";
 import { dropSentences } from "../reply-hygiene";
 
-export const CORE_MODEL = process.env.CORE_MODEL || "gpt-4o-mini";
 export const shadowOn = () => process.env.CORE_SHADOW === "on";
 
 export interface PreTurn { userId: string; name: string; facts: string; known: string; numbers: string; conversation: Array<{ role: "user" | "assistant"; content: string }>; tools?: string; away?: string }
@@ -172,7 +171,7 @@ export async function understand(openai: OpenAI, message: string, known = "KNOWN
   assertAiOnline("core_understand");
   const { FACTS_INSTRUCTIONS } = await import("./client-record");
   const r = await openai.chat.completions.create({
-    model: CORE_MODEL, temperature: 0, max_tokens: 500, response_format: { type: "json_object" },
+    model: MODEL.understand, temperature: 0, max_tokens: 500, response_format: { type: "json_object" },
     messages: [{ role: "system", content: `${UNDERSTAND_SYSTEM}\n\n${FACTS_INSTRUCTIONS}\n\n${known}` }, { role: "user", content: message.slice(0, cap) }],
   });
   const raw = r.choices[0]?.message?.content || "{}";
@@ -223,7 +222,7 @@ export async function compose(openai: OpenAI, pre: PreTurn, message: string, u: 
     u ? `THIS TURN: ${u.family} — they want: ${u.wants}${u.one_question ? `\nIf you need one thing, ask: ${u.one_question}` : ""}` : "",
   ].filter(Boolean).join("\n\n");
   const r = await openai.chat.completions.create({
-    model: CORE_MODEL, temperature: 0.4, max_tokens: 300,
+    model: MODEL.compose, temperature: 0.4, max_tokens: 300,
     messages: [{ role: "system", content: `${COMPOSE_SYSTEM}\n\n${context}` }, ...pre.conversation, { role: "user", content: message }],
   });
   const reply = (r.choices[0]?.message?.content || "").trim();
@@ -628,7 +627,7 @@ export async function runShadow(pre: PreTurn | null, message: string, rootId: st
       userId: pre.userId, rootId, inputText: message,
       understanding: scoped ? { ...(u ?? {}), floor: "scope" } as any : failed ? { failed: "understanding_failed" } as any : u,
       factsRead: pre.facts ? pre.facts.split("\n").length - 1 : 0,
-      reply: reply ?? "", model: CORE_MODEL, ms: Date.now() - t0,
+      reply: reply ?? "", model: MODEL.compose, ms: Date.now() - t0,
     });
   } catch (e) {
     const { isAiOfflineError } = await import("../ai-offline");

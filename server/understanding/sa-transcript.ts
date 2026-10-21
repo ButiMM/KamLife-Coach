@@ -15,6 +15,7 @@
 import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
 import { looksLikeRefusal } from "./refusal";
+import { MODEL } from "../ai-offline";
 export { looksLikeRefusal } from "./refusal";
 
 const SA_CLEAN_SYSTEM = `You clean South African English voice-note transcripts before a coach reads them. The speaker is an ordinary South African (often a low-literacy, first-language-not-English client) talking about food, training, and how they feel.
@@ -335,7 +336,7 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
   try {
     assertAiOnline("sa_clean");
     const resp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.understand,
       temperature: 0,
       max_tokens: Math.min(500, Math.ceil(head.length / 2) + 80),
       messages: [

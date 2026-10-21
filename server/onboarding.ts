@@ -44,6 +44,7 @@ function declinesOptionalStep(msg: string): boolean {
 }
 import { welcomeAvatarMarker } from "./macro-card-attach";
 import { PRICING, GUARANTEE_PHRASE } from "../shared/pricing";
+import { MODEL } from "./ai-offline";
 
 // ============================================================
 // ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
@@ -475,7 +476,7 @@ async function extractBulkIntake(text: string): Promise<BulkIntake | null> {
     const client = (await import("./gpt")).metered(new OpenAI({ apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY }), "onboarding"); // #570
     // gpt-4o-mini (#412): a JSON read of what they typed, with strict omit-if-unsure rules.
     const resp = await client.chat.completions.create({
-      model: "gpt-4o-mini", temperature: 0, max_tokens: 400,
+      model: MODEL.understand, temperature: 0, max_tokens: 400,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: BULK_SYSTEM },

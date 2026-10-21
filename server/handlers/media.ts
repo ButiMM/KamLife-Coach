@@ -58,6 +58,7 @@ import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
 import { PRICE_ESTIMATE_NOTE } from "../reply-contract";
+import { MODEL } from "../ai-offline";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -86,7 +87,7 @@ interface WorkoutIdResult {
 async function identifyExercisesFromImages(
   openai: OpenAI,
   images: Array<{ b64: string; ct: string }>,
-  model = "gpt-4o",
+  model: string = MODEL.vision,
 ): Promise<WorkoutIdResult> {
   const userContent: ChatCompletionContentPart[] = [
     {
@@ -219,7 +220,7 @@ export async function handleMediaMessage(ctx: {
       if ((noCaption || !hasObviousFoodCaption) && !isStepScreenshot) {
         try {
           const classifyResp = await withTimeout("image_classify", 8000, () => openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: MODEL.visionLight,
             max_tokens: 8,
             temperature: 0,
             messages: [
@@ -273,7 +274,7 @@ export async function handleMediaMessage(ctx: {
             }
             // Reference screenshot — a TikTok/IG workout the client saved. Identify the moves.
             const shotParsed = await identifyExercisesFromImages(
-              openai, [{ b64: base64, ct: contentType }], "gpt-4o-mini",
+              openai, [{ b64: base64, ct: contentType }], MODEL.visionLight,
             ).catch((e) => { console.warn("[exercise_identify]", e); return null; });
             const shotBreakdown = formatWorkoutBreakdown(shotParsed);
             if (shotBreakdown) {
@@ -298,7 +299,7 @@ export async function handleMediaMessage(ctx: {
           if ((uncaptionedType as any) === "scale") {
             try {
               const scaleOcr = await withTimeout("scale_ocr", 10000, () => openai.chat.completions.create({
-                model: "gpt-4o-mini", max_tokens: 10, temperature: 0,
+                model: MODEL.visionLight, max_tokens: 10, temperature: 0,
                 messages: [
                   { role: "system", content: "Read the body weight number shown on this bathroom scale. Reply with ONLY the number in kg (e.g. 82.4). If you cannot read it clearly, reply NOT_VISIBLE." },
                   { role: "user", content: [{ type: "text", text: "What weight does this scale show?" }, { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
@@ -326,7 +327,7 @@ export async function handleMediaMessage(ctx: {
       if (isStepScreenshot) {
         try {
           const stepVisionResponse = await withTimeout("step_vision", 18000, () => openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: MODEL.visionLight,
             max_tokens: 50,
             messages: [
               { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps (next to the word 'steps', a footprint icon, or a clearly identified steps card). Calories, heart rate, dates, phone numbers, prices, times — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is labelled but a RUN/WALK DISTANCE is clearly shown (e.g. 10.2 km on a Strava/Runkeeper/Adidas/Nike/Garmin activity screen), reply DISTANCE:<km> — e.g. DISTANCE:10.2 — and add RUN or WALK after it if the activity type is visible, e.g. DISTANCE:10.2 RUN. If neither is clearly shown, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
@@ -467,7 +468,7 @@ export async function handleMediaMessage(ctx: {
                     const shrunkAlbum = await downscaleForVision(Buffer.from(buf).toString("base64"), r.headers.get("content-type") || "image/jpeg");
                     const b64 = shrunkAlbum.b64, ct = shrunkAlbum.ct;
                     const vis = await withTimeout("album_food_vision", 22000, () => openai.chat.completions.create({
-                      model: "gpt-4o-mini", max_tokens: 250,
+                      model: MODEL.visionLight, max_tokens: 250,
                       messages: [
                         { role: "system", content: `You are Coach K, a South African fitness coach. Analyse this food photo and estimate calories and protein. Always end with a line in this exact format: "TOTAL: X kcal | Yg protein". If the image is clearly not food (fitness app screenshot, step counter, person, gym equipment), reply exactly: NOT_FOOD` },
                         { role: "user", content: [
@@ -679,7 +680,7 @@ export async function handleMediaMessage(ctx: {
       if (isEquipCaption) {
         try {
           const equipVision = await withTimeout("equip_vision", 10000, () => openai.chat.completions.create({
-            model: "gpt-4o-mini", max_tokens: 20, temperature: 0,
+            model: MODEL.visionLight, max_tokens: 20, temperature: 0,
             messages: [
               { role: "system", content: "Identify gym equipment in this image. Reply with ONE word only: dumbbells | bands | barbell | kettlebell | machine | mixed | other. Food, drinks, cans, bottles, laptops, furniture = other." },
               { role: "user", content: [{ type: "text", text: "What equipment is shown?" }, { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
@@ -707,7 +708,7 @@ export async function handleMediaMessage(ctx: {
       if (isWaterCaption || /^(water|💧)$/i.test((message || "").trim())) {
         try {
           const bottleCheck = await withTimeout("bottle_check", 8000, () => openai.chat.completions.create({
-            model: "gpt-4o-mini", max_tokens: 80, temperature: 0,
+            model: MODEL.visionLight, max_tokens: 80, temperature: 0,
             messages: [
               { role: "system", content: `You are analysing a photo. Reply with JSON only: {"isBottle": true/false, "sizeMl": number or null, "fillPct": number 0-100 or null}.\nisBottle: true if the photo primarily shows a water bottle, glass, cup, or drinking container.\nsizeMl: your best estimate of the container's capacity in ml (500 for a standard bottle, 750 for a gym bottle, 1000 for a 1L bottle, 330 for a small bottle, 250 for a glass).\nfillPct: how full it appears (100 = completely full, 50 = half, 0 = empty).` },
               { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
@@ -803,9 +804,9 @@ export async function handleMediaMessage(ctx: {
         ],
       })));
       let visionResponse = await foodVision(foodVisionDecision.model).catch(async (e) => {
-        if (foodVisionDecision.model === "gpt-4o-mini" || /timeout/i.test(String((e as Error)?.message))) throw e;
+        if (foodVisionDecision.model === MODEL.visionLight || /timeout/i.test(String((e as Error)?.message))) throw e;
         console.error(`[MEDIA][${mediaTrace}] food_vision ${foodVisionDecision.model} refused, retrying gpt-4o-mini:`, (e as Error)?.message);
-        return foodVision("gpt-4o-mini");
+        return foodVision(MODEL.visionLight);
       });
       const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
       const foodVisionMs = Date.now() - foodVisionStart;
@@ -1080,7 +1081,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             } else if (/^NOT_FOOD\b/i.test(extraText) || extraText.length > 5) {
               // Food vision found nothing — this extra image might be a step screenshot
               const stepVis = await withTimeout("extra_step_ocr", 10000, () => openai.chat.completions.create({
-                model: "gpt-4o-mini", max_tokens: 20,
+                model: MODEL.visionLight, max_tokens: 20,
                 messages: [
                   { role: "system", content: "Extract the step count from this fitness app screenshot. Reply with ONLY the number, or NOT_STEPS if no step count is visible." },
                   { role: "user", content: [
@@ -1310,7 +1311,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const take = (v: any) => { transcription = { text: v?.text || "" }; voiceQuality = whisperSegmentMetrics(v); };
         const ask = (label: string, ms: number, extra: Record<string, unknown>) =>
           withTimeout(label, ms, () => openai.audio.transcriptions.create({
-            file: createReadStream(tmpAudioPath), model: "whisper-1", prompt: whisperPrompt,
+            file: createReadStream(tmpAudioPath), model: MODEL.transcribe, prompt: whisperPrompt,
             response_format: "verbose_json", ...extra,
           } as any));
         try {
@@ -1486,7 +1487,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           const frames = await extractVideoFrames(vbuf, vext, 8);
           if (frames.length === 0) { await sendWhatsApp(phone, fallbackMsg); return; }
           const parsed = await identifyExercisesFromImages(
-            openai, frames.map(b => ({ b64: b, ct: "image/jpeg" })), "gpt-4o",
+            openai, frames.map(b => ({ b64: b, ct: "image/jpeg" })), MODEL.vision,
           ).catch((e) => { console.warn("[WORKOUT_VIDEO] identify", e); return null; });
           const breakdown = formatWorkoutBreakdown(parsed);
           if (!breakdown) { await sendWhatsApp(phone, fallbackMsg); return; }
@@ -1523,7 +1524,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         if (frames.length === 0) { await sendWhatsApp(phone, fallback); return; }
         const { system: fSys, user: fUser } = buildFormCheckPrompt({ clientName: clientNameVid, exerciseName, fromVideo: true });
         const resp = await openai.chat.completions.create({
-          model: "gpt-4o",
+          model: MODEL.vision,
           max_tokens: 400,
           messages: [
             { role: "system", content: fSys },

@@ -15,7 +15,7 @@ import { weightInContextLine } from "./weight-context";
 import { getWeightTruth, sastDayBucketSql, readTrustedStepDays } from "./day-ledger";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
-import { assertAiOnline, isAiOfflineError, isQuotaExhausted, shouldAlertAiDown, releaseAiDownAlert } from "./ai-offline";
+import { MODEL, assertAiOnline, isAiOfflineError, isQuotaExhausted, shouldAlertAiDown, releaseAiDownAlert } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
@@ -598,7 +598,7 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   const crisis = GPT4O_TEXT_SIGNALS.find(s => msgLower.includes(s));
   if (crisis) {
     console.log(`[MODEL] gpt-4o (crisis) — matched: "${crisis}"`);
-    return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
+    return { model: MODEL.strong, maxTokens: 400, reason: "crisis" };
   }
 
   // COST (#412, CTO): gpt-4o (~16x mini) is kept for crisis above and for photo reading only. The
@@ -616,13 +616,13 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   const longForm = LONG_FORM_SIGNALS.find(s => bothLower.includes(s));
   if (longForm) {
     console.log(`[MODEL] gpt-4o-mini (long-form) — matched: "${longForm}"`);
-    return { model: "gpt-4o-mini", maxTokens: 900, reason: "long_form" };
+    return { model: MODEL.compose, maxTokens: 900, reason: "long_form" };
   }
 
   console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
   // Conversational replies are hard-capped at ~60 words / 3 sentences by the voice
   // rules (~90 tokens) — 160 leaves headroom without paying for runaway outputs.
-  return { model: "gpt-4o-mini", maxTokens: 160, reason: "coaching" };
+  return { model: MODEL.compose, maxTokens: 160, reason: "coaching" };
 }
 
 export interface GptFoodItem {
@@ -672,7 +672,7 @@ export async function gptFoodFallback(
     const protTarget = user.proteinTarget || 120;
 
     const resp = await withOpenAIRetry(() => openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.understand,
       temperature: 0,
       max_tokens: 400,
       tools: [
@@ -867,7 +867,7 @@ export async function gptFoodSupplement(
 
   try {
     const resp = await withOpenAIRetry(() => openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.understand,
       temperature: 0,
       max_tokens: 250,
       tools: [
@@ -1114,7 +1114,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     captureQualitySignal("verifier_violation", { userId: user.id, messageIn: userMessage, messageOut: rawReply, detail: verdict.violation });
     try {
       const fixResp = await withOpenAIRetry(() => openai.chat.completions.create({
-        model: "gpt-4o-mini", temperature: 0.3, max_tokens: 220,
+        model: MODEL.compose, temperature: 0.3, max_tokens: 220,
         messages: [
           { role: "system", content: `You are Coach K. Your previous reply broke a rule and must be rewritten. RULE BROKEN: ${verdict.violation} Keep the warmth and brevity (max 3 sentences), fix the fault, and NEVER repeat the rule-breaking content.` },
           { role: "user", content: `Client said: "${userMessage}"\nYour reply to rewrite: "${rawReply}"` },
@@ -1245,7 +1245,7 @@ export async function generateMilestoneVoiceScript(
   try {
     assertAiOnline("milestoneVoiceScript"); // offline test mode: skip network, fall through to deterministic script
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.compose,
       max_tokens: 120,
       temperature: 0.7,
       messages: [
