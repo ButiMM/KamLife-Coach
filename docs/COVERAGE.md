@@ -33,13 +33,13 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **A8** | Workout done, show today's workout | **Proven in trace** (session written, alone and beside a meal); #672 fixed the Thursday double session | A stated session in the same sentence as a correction is dropped (#684). "My knee hurt" changes the next plan: not proven | #684 #568 | C, L |
 | **A9** | Equipment and form check | Frozen (founder, 30 Sep; files deleted #551) | — | — | — |
 | **A10** | What to eat, swaps, restaurants | Built: the new coach answers first (#655; Codex 15 Oct: Spur reaches the coach); on a hold the restaurant guide carries no kcal (#697) | Batch 2: the remaining old food doors | #568 | C |
-| **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Two-week plateau judged on 7 days (#682, still reproduces 21 Oct) | #682 | I |
+| **A11** | Coaching talk: stress, shame, plateaus | Built (new coach) | Two-week plateau judged on 7 days (#682, still reproduces 21 Oct; fix in PR #728) | #682 | I |
 | **A12** | Goal change, "am I on track" | Partly old (`misc-commands`; #689 deleted five talk exits there) | SET_GOAL through the coach with confirm; trace case | #568 | C |
 | **A13** | **Memory**: uses what they told it | **Store and end proven in trace** (knee, nights, fish stored; "fine now" and "forget" end them) | The reply's use of them is unproven live (L4); a disclosure inside a resend goes unheard (#702); 9 old stores still exist (D2) | #568 #702 | **L** |
 | **A14** | Reminders | **Proven in trace** (the reminder row is written, for 15:00 SAST); held outside the window | — | — | — |
 | **A15** | Sick or injured pause, pain | Old `sick-flow`; "stop messaging me for 2 weeks" pauses (#692) | Through the coach; trace case; "until the end of the month" pauses 7 days (#693) | #693 | B |
-| **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | A wrong logged-day count passes the verifier (#682, still reproduces 21 Oct) | #682 | I |
-| **A17** | Off-topic redirect | Built (#657; #688: "medicine ball", a letter about their own training, and a log beside an off-domain ask) | "Write my cousin a birthday poem" still escapes (#683); an off-domain ask that doesn't open the message gets through (#691) | #683 #691 | D |
+| **A16** | Stats, "how was my week" | Built (new coach, from the ledger) | A wrong logged-day count passes the verifier (#682, still reproduces 21 Oct; fix in PR #728) | #682 | I |
+| **A17** | Off-topic redirect | Built (#657; #688: "medicine ball", a letter about their own training, and a log beside an off-domain ask) | "Write my cousin a birthday poem" still escapes (#683; fix in PR #727); an off-domain ask that doesn't open the message gets through (#691) | #683 #691 | D |
 | **A18** | SA languages everywhere | Built (11 gate cases, isiXhosa in the trace) | Live proof per language; Afrikaans shame ("Ek is hopeloos") skips the shame-safe receipt (#683, still reproduces 21 Oct); the safety floors miss isiZulu, Setswana/Sesotho, Afrikaans and isiXhosa wording (#704, #705, #707, #708) | #683 #704 #705 #707 #708 | I |
 | **A19** | Promises followed up | Built (#545, #564, #629, #652) | Shame filter on the reply after a miss | #563 | D |
 
@@ -57,7 +57,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **B9** | Onboarding catch-ups | Built (#665: days 1–3 in the coach's words, from the record) | Live proof with a new tester | — | F |
 | **B10** | Voice broadcasts (ElevenLabs) | Unknown if on | Check: off unless the founder wants it (cost) | — | H |
 | **B11** | Outside 24h: approved template or nothing | Built (#653) | Check-in template SID approved (founder); the dashboard check-in to quiet clients reaches nobody and shows the wrong reason (#681) | #415 #681 | J |
-| **B12** | Opt-out on every path | Built: SA-language opt-out stored (#714, merged 21 Oct) | An SA opt-out that names a topic after the messages word ("ungandithumeleli imiyalezo ye-calories") still stops everything (#721, [harm], reproduced on `main`) | #721 | **A** |
+| **B12** | Opt-out on every path | Built: an SA-language opt-out is stored (#714), and a topic opt-out ("ungandithumeleli imiyalezo ye-calories") stops only that topic (#723); both merged 21 Oct | Live proof | — | — |
 | — | Every scheduled send through one owner | Open; target changes now go through the guarded send (#671) | The other jobs | #319 | F |
 
 ### C. Money, trust, safety
@@ -68,7 +68,7 @@ This table is the single list. Every row of the map below, every Codex and Grok 
 | **C3** | Cancel and refund do what they say | Built (#687: a refund never overwrites the cancel-by-hand task; #690: a cancel inside a sentence reaches the cancel flow; #692: "money back please" reaches the refund flow) | Live proof | — | E |
 | **C4** | Delete my data | Built (#625) | — | — | H |
 | **C5** | Under 18 | Built (#574) | — | — | — |
-| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658, #688; holds #694, #697, #699). **21 Oct, Codex safety journey, all merged:** crisis wording in five SA languages (#712), pregnancy wording (#713), Afrikaans, isiZulu and Sotho-Tswana purging (#715), metformin and chronic-script timing (#716), "chest went tight, left arm tingling" plus a training hold until cleared (#717). The CTO re-ran every Codex and ATTACK sentence on `main` `23e476a`: all pass | The heart-clearance gate lets a workout ask through beside food or steps (#722, [harm]); no SA-language medicine words (#718); the client's own earlier figures on a hold (#700); a bare "1,650" (#710) | #722 #718 #700 #710 | **A** |
+| **C6** | Pregnancy, ED, crisis, medication | Built (#579, #617, #629, #656, #658, #688; holds #694, #697, #699). **21 Oct, Codex safety journey, all merged:** crisis wording in five SA languages (#712), pregnancy wording (#713), Afrikaans, isiZulu and Sotho-Tswana purging (#715), metformin and chronic-script timing (#716), "chest went tight, left arm tingling" plus a training hold until cleared (#717). The CTO re-ran every Codex and ATTACK sentence on `main` `23e476a`: all pass | In review: the heart gate holds a workout ask beside food or steps (PR #724 for #722), SA-language medicine words (PR #725 for #718), a bare "1,650" (PR #726 for #710). Open: the workout owner itself never reads the clearance hold (#731, [harm]); a held client's steps or meal can be lost to the gate (#732); the client's own earlier figures on a hold (#700) | #731 #732 #700 | **A** |
 | **C7** | Founder alerted | Built | Dashboard key strength (founder) | #417 | J |
 | **C8** | Referrals | Built (#663) | The free month can be farmed: refund, reset, duplicate codes (#680) | #680 | E |
 
