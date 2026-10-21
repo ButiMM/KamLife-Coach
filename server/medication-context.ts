@@ -11,7 +11,10 @@ const GLP1_RE = /\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|lir
 // #709: and the chronic scripts our clients name instead of saying "my medication".
 const NAMED = "metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz";
 const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?|metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz)\b/i; // the same names as NAMED
-const THE_MEDICINE = `(?:it(?!\\s+easy)|them|(?:my\\s+|the\\s+)?(?:medication|meds?|medicine|insulin|tablets?|pills?|${NAMED}))`;
+// A named medicine keeps the wide window. A bare "it"/"them" needs the timing words within three words, and never
+// "before"/"after": "can I take it slow and walk after supper" is about walking (#716 ATTACK @ c81c01d).
+const A_MEDICINE = `(?:my\\s+|the\\s+)?(?:medication|meds?|medicine|insulin|tablets?|pills?|${NAMED})`;
+const THE_MEDICINE = `(?:it(?!\\s+easy)|them|${A_MEDICINE})`;
 
 export function detectMedicationContext(message: string): MedicationContextDecision {
   const m = String(message || "").toLowerCase().replace(/\bmedicine\s+balls?\b/g, "med-ball"); // equipment, not a medicine (#679)
@@ -39,7 +42,7 @@ export function detectMedicationContext(message: string): MedicationContextDecis
     return { present: true, medicationClass: "glp1", unsafeRequest: true, reason: "adverse_reaction" };
   }
   // WHEN TO TAKE IT (#709): "can I take my metformin at night instead of morning?" changes how a prescription is taken.
-  if (new RegExp(`\\b(?:can|could|should|may)\\s+i\\s+(?:still\\s+)?take\\s+${THE_MEDICINE}\\b[^.!?]{0,40}\\b(?:at\\s+night|in\\s+the\\s+(?:morning|evening)|instead\\s+of|later|earlier|before|after)\\b|\\b(?:swap|move|switch|change|shift)\\s+(?:the\\s+time\\s+(?:of|i\\s+take)\\s+)?${THE_MEDICINE}\\b[^.!?]{0,30}\\b(?:night|morning|evening|later|earlier|time)\\b`, "i").test(m)) {
+  if (new RegExp(`\\b(?:can|could|should|may)\\s+i\\s+(?:still\\s+)?take\\s+(?:${A_MEDICINE}\\b[^.!?]{0,40}\\b(?:at\\s+night|in\\s+the\\s+(?:morning|evening)|instead\\s+of|later|earlier|before|after)|(?:it(?!\\s+(?:easy|slow|one\\s+day))|them)\\s+(?:\\S+\\s+){0,3}?(?:at\\s+night|in\\s+the\\s+(?:morning|evening)|instead\\s+of|later|earlier))\\b|\\b(?:swap|move|switch|change|shift)\\s+(?:the\\s+time\\s+(?:of|i\\s+take)\\s+)?${THE_MEDICINE}\\b[^.!?]{0,30}\\b(?:night|morning|evening|later|earlier|time)\\b`, "i").test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "timing" };
   }
   // CHOOSING A MEDICINE (#321): "what antibiotic should I take for a sore throat" asks the coach to
