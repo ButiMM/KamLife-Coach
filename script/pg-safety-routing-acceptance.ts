@@ -285,7 +285,12 @@ for (const [text, urgent] of [["How much Ozempic should I take this week?", fals
   const held = (await pool.query("SELECT doctor_clearance_required h FROM users WHERE id = $1", [H.id])).rows[0].h;
   chk(modelCalls === 0 && /10177/.test(r) && /stop/i.test(r) && held === true, "chest tight + left arm tingling: stop, call 10177, no model, and the clearance hold is set", `${modelCalls} calls | hold=${held} | ${r.slice(0, 120)}`);
   const w = await say(H, "What's my workout today?");
-  chk(/clearance/i.test(w) && /chest symptoms/i.test(w), "…and the next workout ask waits for a doctor's clearance", w.slice(0, 160)); }
+  chk(/clearance/i.test(w) && /chest symptoms/i.test(w), "…and the next workout ask waits for a doctor's clearance", w.slice(0, 160));
+  // #717 review: naming a doctor is not the clearance, and every scheduled reader holds training.
+  const d = await say(H, "I haven't seen my doctor yet; show me today's workout");
+  chk(/clearance/i.test(d), "…\"I haven't seen my doctor yet; show me today's workout\" is still held", d.slice(0, 160));
+  const { readHeldConstraints } = await import("../server/held-constraints");
+  chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training"); }
 
 await pool.end().catch(() => {});
 REAL(`\npg-safety-routing-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);

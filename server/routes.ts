@@ -350,7 +350,9 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
   // ---- HEART CONDITION CLEARANCE GATE ----
   // Users with heart_condition must confirm doctor clearance before receiving workouts
-  if (user.doctorClearanceRequired && !/(doctor|cleared|clearance|got clearance|doctor said|my doctor|spoke to doctor|physician|cardiologist)/i.test(m)) {
+  // Only the clearance itself lifts it: "I haven't seen my doctor yet, show me today's workout" is still held (#717 review).
+  const confirmsClearance = (/(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i).test(m);
+  if (user.doctorClearanceRequired && !confirmsClearance) {
     const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
     {
       const name = getDisplayName(user) || "there";
@@ -366,7 +368,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     }
   }
   // Accept doctor clearance confirmation
-  if (user.doctorClearanceRequired && /(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i.test(m)) {
+  if (user.doctorClearanceRequired && confirmsClearance) {
     await db.update(users).set({ doctorClearanceRequired: false }).where(eq(users.phoneNumber, phone));
     const name = getDisplayName(user) || "there";
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
