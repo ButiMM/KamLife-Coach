@@ -236,6 +236,13 @@ for (const [lang, text] of [
   const meals = Number((await pool.query("SELECT count(*) n FROM meal_logs WHERE user_id = $1", [L.id])).rows[0].n);
   chk((await situation(L)) === "disordered_eating" && modelCalls === 0 && meals === 0 && givesEdHelpline(r) && !/kcal|calorie/i.test(r), `${lang}: purging after a meal sets the hold, with no model, no meal row and the helpline`, `life_situation=${await situation(L)} | ${modelCalls} calls | meals=${meals} | ${r.slice(0, 120)}`);
 }
+{ // #715 review: her own words beside an English relative are still hers; sweets thrown in the bin are not a disclosure.
+  const O = await client("Purging Own");
+  await say(O, "Ngizihlanzisa emva kokudla, my sister is worried");
+  chk((await situation(O)) === "disordered_eating", "isiZulu disclosure beside \"my sister\" is still the client's own", `life_situation=${await situation(O)}`);
+  const B = await client("Sweets Out");
+  await say(B, "Ek het al die soetgoed uitgegooi na aandete");
+  chk((await situation(B)) !== "disordered_eating", "CONTROL — \"ek het al die soetgoed uitgegooi\" (threw the sweets out) is not a disclosure", `life_situation=${await situation(B)}`); }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n3. ONBOARDING — \"are you currently pregnant…?\" must have a pregnant answer");
