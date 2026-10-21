@@ -263,6 +263,13 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   const W = await client("Asks Why");
   await say(W, "Kutheni ungandithumeleli imiyalezo?");
   chk((await proactiveReaches(W)).length === 3, "\"Kutheni ungandithumeleli imiyalezo?\" is a question, not an opt-out");
+  // #714 ATTACK @ a299080: dropping one topic in isiXhosa or isiZulu is not dropping the channel.
+  const T1 = await client("Drops Water Reminder");
+  await say(T1, "Ungandithumeleli i-reminder yamanzi, ndiyakhumbula.");
+  chk((await proactiveReaches(T1)).length === 3, "\"ungandithumeleli i-reminder yamanzi\" (just the water reminder) is not an opt-out");
+  const T2 = await client("Drops Fish Recipes");
+  await say(T2, "Ungangithumeleli ama-recipe enhlanzi, angiyidli.");
+  chk((await proactiveReaches(T2)).length === 3, "\"ungangithumeleli ama-recipe enhlanzi\" (just fish recipes) is not an opt-out");
   const O = OPTED[0];
   const r = await say(O, "What should I eat for dinner?");
   chk(r.length > 0, "a client who opted out and then writes to us still gets a reply", `reply=${JSON.stringify(r)}`);
