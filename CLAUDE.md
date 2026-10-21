@@ -14,7 +14,7 @@ Make what testers experience right. Done means **a tester sees it**: the change 
 - Keep these green: the safety and billing pg suites (`safety-routing`, `opt-out`, `cancel-menu`, `payments-cancel-truth`, `refund-guarantee`, `spend-cap`), unit tests, and `core-wave1-switch`.
 
 ## How a message is answered (the front door, #592)
-1. **Floors, in code:** safety (crisis, pregnancy, eating disorders, medication, minors), STOP and opt-out, POPIA, onboarding, billing and cancel menus, heart clearance, pending answers (`awaitingInputType`, engine confirm), founder commands.
+1. **Floors, in code:** safety (crisis, pregnancy, eating disorders, medication, minors), STOP and opt-out, POPIA, onboarding, billing and cancel menus, heart clearance, pending answers (`awaitingInputType`, engine confirm), founder commands. And when the coach can't read a turn, the report floor (`understanding/report-floor.ts`) still saves weight, steps, water, sleep and "workout done"; food is not in it.
 2. **Exact commands, the whole message only:** `menu`, `progress`, `targets`, `help`, `stop`, button numbers.
 3. **Everything else goes to the new coach** (`core/coach.ts` `frontTurn`): one `understand()` read covers meaning, scope, facts and actions. The actions run through the existing tools for every client (executor → scanner, steps, weight, water; corrections; workouts; goal confirm; reminders). Then `compose()`. Two model calls a turn.
 4. **The old handlers answer only when** the coach declines: there's no read, the model is down, the spend cap is hit, or `CORE_FRONT=off`. That rollback expires 14 Oct; after 48 clean hours the old handlers behind it are deleted.

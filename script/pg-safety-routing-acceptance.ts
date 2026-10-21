@@ -178,6 +178,22 @@ const P = await client("Bonolo Pregnant");
   chk(givesEdHelpline(r2) && (await situation(E)) === "disordered_eating", "the purging disclosure with smart quotes routes too", `reply=${JSON.stringify(r2)}`);
 }
 
+// #705: her own disclosure in the language she writes in sets the same hold, before any model.
+for (const [lang, text] of [
+  ["Setswana/Sesotho", "Ke ne ke sa ikutlwe hantle, ke nahana gore ke imile. Test e re positive maabane."],
+  ["isiZulu", "Bengingazizwa kahle, ngikhulelwe. I-test ithe positive izolo."],
+  ["isiXhosa", "Bendingaziva kakuhle, ndikhulelwe. I-test ithe positive izolo."],
+  ["Afrikaans", "Ek voel nie lekker nie, ek is swanger. Die toets was gister positief."],
+  ["Sesotho (imme)", "Ke imme. Ke fumane sephetho maobane."],
+] as const) {
+  const L = await client(`Pregnant ${lang}`);
+  modelCalls = 0;
+  const r = await say(L, text);
+  chk((await situation(L)) === "pregnant" && modelCalls === 0 && refersToCare(r) && !givesWeightLossTarget(r), `${lang}: her disclosure sets the pregnancy hold, with no model and a referral`, `life_situation=${await situation(L)} | ${modelCalls} calls | ${r.slice(0, 120)}`);
+}
+{ const P = await client("Pregnant Past"); await say(P, "Ke ne ke imile ngwaga o o fetileng, jaanong ke batla go fokotsa boima.");
+  chk((await situation(P)) !== "pregnant", "Setswana: a past pregnancy (\"ke ne ke imile\") does not set the hold", `life_situation=${await situation(P)}`); }
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n2. DISORDERED EATING — AUDIT.md Trace 6 and the behaviours around it");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -291,6 +307,21 @@ for (const [text, urgent] of [["How much Ozempic should I take this week?", fals
   chk(/clearance/i.test(d), "…\"I haven't seen my doctor yet; show me today's workout\" is still held", d.slice(0, 160));
   const { readHeldConstraints } = await import("../server/held-constraints");
   chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training"); }
+REAL("\n6. CRISIS — passive ideation in the languages our clients write in (#704)");
+for (const [lang, text] of [
+  ["isiZulu", "Ngikhathele yonke into. Angisafuni nokuvuka ekuseni, kungcono ngingabikho nje."],
+  ["isiXhosa", "Ndidiniwe yiyo yonke into, kungcono ndingabikho nje."],
+  ["Sesotho", "Ke kgathetse haholo, ha ke sa batla ho tsoha hoseng."],
+  ["Setswana", "Ke lapile thata, ke batla go nyelela fela."],
+  ["Afrikaans", "Ek is so moeg vir alles, ek wil nie meer wakker word nie."],
+] as const) {
+  const C = await client(`Crisis ${lang}`);
+  modelCalls = 0;
+  const r = await say(C, text);
+  chk(modelCalls === 0 && /0800 567 567/.test(r) && (await escalationReasons(C)).includes("crisis"), `${lang}: passive ideation gets the helplines, no model, and the founder is told`, `${modelCalls} calls | ${await escalationReasons(C)} | ${r.slice(0, 120)}`);
+}
+{ const D = await client("Crisis Device"); const r = await say(D, "My Fitbit wil nie meer wakker word nie, maar dit is vol gelaai.");
+  chk(!/0800 567 567/.test(r) && !(await escalationReasons(D)).includes("crisis"), "Afrikaans: a device that won't wake up is not a crisis", `${await escalationReasons(D)} | ${r.slice(0, 120)}`); }
 
 await pool.end().catch(() => {});
 REAL(`\npg-safety-routing-acceptance: ${failed === 0 ? "GREEN" : `FAILED — ${failed} assertion(s)`}`);
