@@ -1242,6 +1242,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!/thigh|150g|cooked/i.test(r), `the scanner's qualifiers must not reach them: "${r}"`);
   });
 
+  test("food reply: shame in Afrikaans, isiZulu, isiXhosa, Setswana and Sesotho is heard (#683)", async () => {
+    const { carriesFeelingClause } = await import("../server/unlogged-notice");
+    for (const [lang, said] of [["Afrikaans", "Ek voel so moeg en ek het weer 'n hele pakkie Simba geëet. Ek is hopeloos."],
+      ["isiZulu", "Ngidle i-kota futhi, ngiyaphoxeka ngempela."], ["isiXhosa", "Nditye i-kota kwakhona, ndineentloni."],
+      ["Setswana", "Ke jele kota gape, ke tlhabilwe ke ditlhong."], ["Sesotho", "Ke jele kota hape, ke hlajwa ke dihlong."]])
+      assert.ok(carriesFeelingClause(said), `${lang}: "${said}"`);
+    assert.ok(!carriesFeelingClause("Ek het 'n kota vir middagete geëet"), "a plain Afrikaans meal carries no shame");
+    const r = await reply("Ek voel so moeg en ek het weer 'n hele pakkie Simba geëet. Ek is hopeloos.", "• Simba chips (generic)");
+    assert.match(r, /one meal doesn'?t break a week/i, "the Afrikaans client calling herself hopeless hears it too");
+  });
+
   test("food reply: a client carrying shame is answered, not audited", async () => {
     const r = await reply("I had a burger, I feel like I ruined everything", "• Burger (generic)");
     assert.match(r, /one meal doesn'?t break a week/i, "voice rule 9, and deterministic — the model may be down");
@@ -5736,6 +5747,8 @@ test("scope: off-domain asks are declined without a model", () => {
     "Please write a business plan for my gym", "Can you write me a cover letter for a gym job?", // #354: a coaching word does not veto the ask
     // Codex on #688: a unit inside the artefact is not a log report.
     "Please write a business plan for a courier that delivers 5kg parcels.", "Write me an essay on the 10km Comrades history",
+    // #683: a recipient between "write" and the poem, and calling us "coach", don't make it coaching.
+    "Can you write my cousin a birthday poem? Something funny.", "Coach, can you write my cousin a birthday poem?",
   ]) assert.ok(offDomainRedirect(m), `must decline: "${m}"`);
 });
 test("scope: a mention inside coaching, or a word with a second meaning, is not an off-domain ask", () => {
@@ -5747,6 +5760,7 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "Write me a letter to my future self about why I'm losing weight", "Can you write me a poem to motivate me for my workout tomorrow",
     "Can you write me a script for my gym routine?", "Please write my CV. Also I walked 8000 steps today and weighed 82kg",
     "Write me an essay about climate change. Also I walked 8000 steps today",
+    "Can you write a letter to my coach asking to deload next week?", // #727 review: "my coach" is not a greeting
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
 });
 test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {
