@@ -10,8 +10,8 @@ export interface MedicationContextDecision {
 const GLP1_RE = /\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus)\b/i;
 // #709: and the chronic scripts our clients name instead of saying "my medication".
 const NAMED = "metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz";
-const MED_RE = new RegExp(`\\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?|${NAMED})\\b`, "i");
-const THE_MEDICINE = `(?:it|them|(?:my\\s+|the\\s+)?(?:medication|meds?|medicine|insulin|tablets?|pills?|${NAMED}))`;
+const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?|metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz)\b/i; // the same names as NAMED
+const THE_MEDICINE = `(?:it(?!\\s+easy)|them|(?:my\\s+|the\\s+)?(?:medication|meds?|medicine|insulin|tablets?|pills?|${NAMED}))`;
 
 export function detectMedicationContext(message: string): MedicationContextDecision {
   const m = String(message || "").toLowerCase().replace(/\bmedicine\s+balls?\b/g, "med-ball"); // equipment, not a medicine (#679)
