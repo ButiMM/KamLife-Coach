@@ -178,6 +178,19 @@ const P = await client("Bonolo Pregnant");
   chk(givesEdHelpline(r2) && (await situation(E)) === "disordered_eating", "the purging disclosure with smart quotes routes too", `reply=${JSON.stringify(r2)}`);
 }
 
+// #705: her own disclosure in the language she writes in sets the same hold, before any model.
+for (const [lang, text] of [
+  ["Setswana/Sesotho", "Ke ne ke sa ikutlwe hantle, ke nahana gore ke imile. Test e re positive maabane."],
+  ["isiZulu", "Bengingazizwa kahle, ngikhulelwe. I-test ithe positive izolo."],
+  ["isiXhosa", "Bendingaziva kakuhle, ndikhulelwe. I-test ithe positive izolo."],
+  ["Afrikaans", "Ek voel nie lekker nie, ek is swanger. Die toets was gister positief."],
+] as const) {
+  const L = await client(`Pregnant ${lang}`);
+  modelCalls = 0;
+  const r = await say(L, text);
+  chk((await situation(L)) === "pregnant" && modelCalls === 0 && refersToCare(r) && !givesWeightLossTarget(r), `${lang}: her disclosure sets the pregnancy hold, with no model and a referral`, `life_situation=${await situation(L)} | ${modelCalls} calls | ${r.slice(0, 120)}`);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 REAL("\n2. DISORDERED EATING — AUDIT.md Trace 6 and the behaviours around it");
 // ══════════════════════════════════════════════════════════════════════════════════════════════
