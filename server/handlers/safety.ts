@@ -122,7 +122,9 @@ async function ensureSafetyTurnUser(
 /** "Stop messaging me", in the client's own words, with or without a length. */
 function saysStopMessaging(m: string): boolean {
   return /^(?:stop(?:\s+all)?|opt[\s-]?out|unsubscribe(?:\s+me)?)[.!\s]*$/i.test(m)
-      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m);
+      || /\b(?:stop|quit)\s+(?:sending|messaging|texting|contacting|whatsapp(?:ing)?)\s+me\b|\bstop\s+(?:sending\s+)?(?:me\s+)?(?:these|the|your|all)\s+messages\b|\b(?:don'?t|do\s+not)\s+(?:want|need)\s+(?:these|your|any\s+more|anymore|any)\s+messages\b|\bno\s+more\s+messages\b|\bunsubscribe\s+me\b|\b(?:don'?t|do\s+not|never)\s+(?:contact|message|text|whatsapp)\s+me\s+(?:again|anymore|any\s+more)\b/i.test(m)
+      // #708: in isiXhosa, isiZulu, Setswana, Sesotho and Afrikaans ("ndicela ungandithumeleli imiyalezo").
+      || /\b(?:ungandithumeleli|ungangithumeleli|(?:musa|yeka)\s+uku(?:ndi|ngi)thumelela|o\s+se\s+(?:ka|ke)\s+wa\s+nthomel{1,2}(?:el)?a|emisa\s+(?:go|ho)\s+nthomel{1,2}(?:el)?a|moenie\s+(?:vir\s+)?my\s+(?:meer\s+)?boodskappe\s+stuur\s+nie|hou\s+op\s+om\s+(?:vir\s+)?my\s+te\s+(?:boodskap|whatsapp)|stuur\s+my\s+nie\s+meer\s+boodskappe\s+nie)\b/i.test(m);
 }
 /** A TOPIC ("about my weight", "just send my workouts") is a preference, not the channel (Codex @ 7716559, @ 558089b). */
 const namesATopic = (m: string) => /\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b/i.test(m);

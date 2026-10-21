@@ -159,6 +159,12 @@ const PHRASES = [
   "no more messages please",
   "Please don't contact me again",   // Codex @ 5c0cd6d
   "I've just been diagnosed with cancer. Please stop messaging me.",   // #286: the illness comfort used to swallow it
+  // #708: in the languages our clients write in
+  "Ndicela ungandithumeleli imiyalezo ngoku, ndiyacela.",   // isiXhosa
+  "Ngicela ungangithumeleli imiyalezo.",                    // isiZulu
+  "Ke kopa o se ka wa nthomelela melaetsa gape.",           // Setswana
+  "Ke kopa o se ke wa nthomella melaetsa hape.",            // Sesotho
+  "Moenie vir my boodskappe stuur nie, asseblief.",         // Afrikaans
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
