@@ -9,8 +9,9 @@ export interface MedicationContextDecision {
 
 const GLP1_RE = /\b(ozempic|wegovy|mounjaro|zepbound|semaglutide|tirzepatide|liraglutide|dulaglutide|saxenda|victoza|rybelsus)\b/i;
 // #709: and the chronic scripts our clients name instead of saying "my medication".
-const NAMED = "metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz";
-const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?|metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz)\b/i; // the same names as NAMED
+// #718: and the words for medicine our clients write in Afrikaans, isiZulu, isiXhosa and Setswana.
+const NAMED = "metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz|pille|medisyne|tablette|amaphilisi|imithi|ipilisi|dipilisi|melemo";
+const MED_RE = /\b(medication|meds?|medicine|insulin|tablets?|pills?|prescription|treatment|antibiotics?|painkillers?|antidepressants?|metformin|glucophage|amlodipine|enalapril|hydrochlorothiazide|hctz|losartan|simvastatin|atorvastatin|arvs?|tld|dolutegravir|tenofovir|efavirenz|pille|medisyne|tablette|amaphilisi|imithi|ipilisi|dipilisi|melemo)\b/i; // the same names as NAMED
 // A named medicine keeps the wide window. A bare "it"/"them" needs the timing words within three words, and never
 // "before"/"after": "can I take it slow and walk after supper" is about walking (#716 ATTACK @ c81c01d).
 const A_MEDICINE = `(?:my\\s+|the\\s+)?(?:medication|meds?|medicine|insulin|tablets?|pills?|${NAMED})`;
@@ -43,6 +44,10 @@ export function detectMedicationContext(message: string): MedicationContextDecis
   }
   // WHEN TO TAKE IT (#709): "can I take my metformin at night instead of morning?" changes how a prescription is taken.
   if (new RegExp(`\\b(?:can|could|should|may)\\s+i\\s+(?:still\\s+)?take\\s+(?:${A_MEDICINE}\\b[^.!?]{0,40}\\b(?:at\\s+night|in\\s+the\\s+(?:morning|evening)|instead\\s+of|later|earlier|before|after)|(?:it(?!\\s+(?:easy|slow|one\\s+day))|them)\\s+(?:\\S+\\s+){0,3}?(?:at\\s+night|in\\s+the\\s+(?:morning|evening)|instead\\s+of|later|earlier))\\b|\\b(?:swap|move|switch|change|shift)\\s+(?:the\\s+time\\s+(?:of|i\\s+take)\\s+)?${THE_MEDICINE}\\b[^.!?]{0,30}\\b(?:night|morning|evening|later|earlier|time)\\b`, "i").test(m)) {
+    return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "timing" };
+  }
+  // …in Afrikaans (#718): "kan ek dit saans drink?" after "ek drink my pille in die oggend".
+  if (/\bkan\s+ek\s+(?:dit|hulle|my\s+\S+)\s+(?:saans|soggens|later|vroeër|vroeer|in\s+die\s+(?:aand|oggend))\s+(?:drink|neem|vat)\b/i.test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "timing" };
   }
   // CHOOSING A MEDICINE (#321): "what antibiotic should I take for a sore throat" asks the coach to
