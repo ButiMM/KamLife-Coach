@@ -47,7 +47,8 @@ export function detectMedicationContext(message: string): MedicationContextDecis
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "timing" };
   }
   // …in Afrikaans (#718): "kan ek dit saans drink?" after "ek drink my pille in die oggend".
-  if (/\bkan\s+ek\s+(?:dit|hulle|my\s+\S+)\s+(?:saans|soggens|later|vroeër|vroeer|in\s+die\s+(?:aand|oggend))\s+(?:drink|neem|vat)\b/i.test(m)) {
+  // The object is "dit"/"hulle" or a medicine, never any "my X": "kan ek my proteienskommel saans drink?" is food (#725 Codex P2).
+  if (new RegExp(`\\bkan\\s+ek\\s+(?:dit|hulle|my\\s+(?:medikasie|insulien|${NAMED}))\\s+(?:saans|soggens|later|vroeër|vroeer|in\\s+die\\s+(?:aand|oggend))\\s+(?:drink|neem|vat)\\b`, "i").test(m)) {
     return { present: true, medicationClass: glp1 ? "glp1" : "other", unsafeRequest: true, reason: "timing" };
   }
   // CHOOSING A MEDICINE (#321): "what antibiotic should I take for a sore throat" asks the coach to
