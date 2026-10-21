@@ -56,7 +56,9 @@ async function foodTools(user: any, message: string): Promise<string> {
 export async function ledgerNumbers(user: any, message = ""): Promise<string> {
   const [{ getProgressTruth }, { getGoalProfile }, { energyFrameLine, waterTargetLitres, stepBurnKcal }, { readHealthState }, { foodConstraints }] = await Promise.all([
     import("../day-ledger"), import("../goal-profiles"), import("../targets"), import("../health-state"), import("../food-swaps")]);
-  const t = await getProgressTruth(user, { days: 7 });
+  // A LONGER SPAN IN THEIR OWN WORDS IS READ OVER THAT SPAN (#682): "two weeks of doing everything right, the scale hasn't
+  // moved" judged on 7 days leaves the second week out, or invented.
+  const t = await getProgressTruth(user, { days: (await import("../sast")).statedSpanDays(message) });
   const sa = (o: Intl.DateTimeFormatOptions) => new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", ...o });
   const lines = [`Time now: ${sa({ weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false })} (SA). Today's numbers are a running count, not a finished day.`];
   const profile = getGoalProfile(user.goalType);

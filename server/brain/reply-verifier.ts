@@ -52,6 +52,8 @@ export interface VerifierFacts {
     sessionsWindow?: number | null;
     /** The window that count covers. Without it the number has no context to be checked in. */
     sessionsWindowDays?: number | null;
+    /** Days with food logged in the last 7, from mealLogs, when the boundary read it (#682). */
+    foodDaysWindow?: number | null;
     /** The coaching decision this turn actually made, from chooseAction. */
     canonicalKind?: string | null;
     canonicalTodo?: string | null;
@@ -477,6 +479,27 @@ function verifyStepAttribution(reply: string, clientMessage: string, evidence?: 
  * canonical-decision boundary above already withholds model prose entirely on a decision turn.
  * ──────────────────────────────────────────────────────────────────────────────────────────── */
 
+/** "You logged food on N days" — how many days the client logged, in model prose (#682). null when the reply claims none. */
+export function loggedDaysClaimed(reply: string): number | null {
+  const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, every: 7, all: 7 };
+  const m = (reply || "").match(/\b(?:logged|tracked)\s+(?:your\s+)?(?:food|meals?|everything|something)?\s*(?:on\s+|for\s+)?(\d+|one|two|three|four|five|six|seven|every|all)\s+(?:of\s+(?:the\s+)?(?:last\s+)?\w+\s+)?days?\b|\b(\d+|one|two|three|four|five|six|seven)\s+(?:of\s+(?:the\s+)?(?:last\s+)?\w+\s+)?days?\s+(?:of\s+)?(?:logged|logging|tracked|tracking)\b/i);
+  if (!m) return null;
+  const n = (m[1] || m[2]).toLowerCase();
+  return /^\d+$/.test(n) ? Number(n) : words[n] ?? null;
+}
+
+/** A count of logged days in model prose must be the count we hold, as a session count must be (#682). */
+function verifyLoggedDays(reply: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
+  if (!evidence?.modelAuthored) return { ok: true };
+  const claimed = loggedDaysClaimed(reply);
+  if (claimed === null) return { ok: true };
+  const held = evidence?.foodDaysWindow;
+  if (typeof held === "number" && claimed === held) return { ok: true };
+  return { ok: false, violation: typeof held === "number"
+    ? `Your reply says the client logged food on ${claimed} day(s), but the record holds ${held} in the last 7 days. Say the number we hold, or say nothing about the count.`
+    : "Your reply states how many days the client logged food, and there is no count on this turn to support it. Answer without the count." };
+}
+
 function verifySessionAttribution(reply: string, clientMessage: string, evidence?: VerifierFacts["evidence"]): VerifierResult {
   // Deterministic replies recite counts they read themselves. Only model prose is held to this.
   if (!evidence?.modelAuthored) return { ok: true };
@@ -868,6 +891,8 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts, decisionOv
 
   const sessionAttribution = verifySessionAttribution(r, facts.clientMessage || "", facts.evidence);
   if (!sessionAttribution.ok) return sessionAttribution;
+  const loggedDays = verifyLoggedDays(r, facts.evidence);
+  if (!loggedDays.ok) return loggedDays;
 
   const goal = String(facts.goalType || "").toLowerCase();
   if (goal === "muscle_gain" && /\b(?:focus on (?:a )?calorie deficit|let'?s (?:focus on|aim for|target) (?:fat|weight) loss|we(?:'?ll| will)? (?:focus|aim|work) on losing (?:weight|fat)|great (?:progress|work|job)[^.!?]{0,40}\blos(?:ing|t)\b[^.!?]{0,20}\b(?:kg|weight)|keep losing|stay in (?:a|your) deficit)\b/i.test(r)) {

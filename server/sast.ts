@@ -345,3 +345,12 @@ export function isFutureIntent(message: string): boolean {
   const text = message.toLowerCase();
   return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\bneeds?\s+to\b|\bhas\s+to\b|\bhave\s+to\b|\bsupposed\s+to\b|\baiming\s+(?:to|for)\b|\bmeant\s+to\b|\bthinking\s+(?:of|about)\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(text);
 }
+
+/** The span a client names for how long something has gone on, in days: "two weeks" 14, "this month" or "since I
+ *  started" 30, otherwise a week. Capped at 30 (#682: a two-week plateau is judged on the two weeks). */
+export function statedSpanDays(text: string): number {
+  const weeks = (text || "").match(/\b(\d|two|three|four)\s+weeks?\b/i)?.[1]?.toLowerCase();
+  if (weeks) return Math.max(7, Math.min(30, 7 * (({ two: 2, three: 3, four: 4 } as Record<string, number>)[weeks] ?? Number(weeks))));
+  if ((/\bfortnight\b/i).test(text || "")) return 14;
+  return (/\b(?:this|a|last|one|whole)\s+month\b|\bsince\s+i\s+(?:started|joined|began)\b/i).test(text || "") ? 30 : 7;
+}
