@@ -140,3 +140,26 @@ export function shouldAlertAiDown(now = Date.now()): boolean {
 }
 /** The alert did not reach the founder: give the slot back so the next failure tries again. */
 export function releaseAiDownAlert(): void { lastAiDownAlert = 0; }
+
+/**
+ * ONE MODEL SETTING PER JOB (#711). Every model call names its job here, so a swap is one env change per job
+ * and no code edit. The defaults are what each job ran on before.
+ *   understand  — reading a client's words (the coach's read, the meaning engine, meal estimates, transcript cleaning)
+ *   compose     — writing a reply (the coach's words, askCoachK, recaps, grocery lists, milestone scripts)
+ *   classify    — a short label or verdict (the domain gate, the verifiers)
+ *   strong      — the turns that need the stronger model (crisis replies, hard reads)
+ *   vision      — reading photos and video where detail matters (paid food photos, progress, form checks)
+ *   visionLight — the cheap photo reads (screenshots, scales, bottles, triage, trial food photos)
+ *   transcribe  — voice notes
+ *   tts         — voice replies
+ */
+export const MODEL = {
+  understand: process.env.MODEL_UNDERSTAND || "gpt-4o-mini",
+  compose: process.env.MODEL_COMPOSE || "gpt-4o-mini",
+  classify: process.env.MODEL_CLASSIFY || "gpt-4o-mini",
+  strong: process.env.MODEL_STRONG || "gpt-4o",
+  vision: process.env.MODEL_VISION || "gpt-4o",
+  visionLight: process.env.MODEL_VISION_LIGHT || "gpt-4o-mini",
+  transcribe: process.env.MODEL_TRANSCRIBE || "whisper-1",
+  tts: process.env.MODEL_TTS || "tts-1",
+};

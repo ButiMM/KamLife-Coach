@@ -28,6 +28,7 @@ import {
   buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, parseBodyState,
   recommendGoalFromRead, formatPhysiqueFocusLine,
 } from "./physique-analysis";
+import { MODEL } from "./ai-offline";
 
 export const MEDICAL_QUESTION = `Any medical conditions I must know about? For example diabetes, high blood pressure, a heart condition, HIV (on ARVs) or PCOS. Or say *none*.`;
 
@@ -138,7 +139,7 @@ async function analyseAndAdvance(user: any, phone: string, openai: OpenAI): Prom
   // gets the strong vision model. Once per client, a fraction of a cent.
   const { system, user: userPrompt } = buildPhysiqueAnalysisPrompt({ gender: user.gender, goal: chosenGoal, name: user.name });
   const resp = await openai.chat.completions.create({
-    model: "gpt-4o", max_tokens: 250,
+    model: MODEL.vision, max_tokens: 250,
     messages: [
       { role: "system", content: system },
       { role: "user", content: [

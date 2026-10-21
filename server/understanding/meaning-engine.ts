@@ -31,6 +31,7 @@ import { renderDeficitEvidence, type DeficitEvidence } from "../adaptive-targets
 import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateActions, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
 import { verifyBrainReply } from "../brain/reply-verifier";
 import { deriveRuntimeDecision, type RuntimeDecisionResult } from "./state";
+import { MODEL } from "../ai-offline";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -146,10 +147,10 @@ EXTRA RULES:
 - A bare exclamation ("Omg!!!", "wow", "yoh", "wtf", "😳", "🙄") is a REACTION to the last exchange, never a new topic. Respond to what just happened between you: if the last messages were a mess or a runaround, own it plainly and give the fix; if it was a win, celebrate it with them. Never answer with a generic "what's on your mind?" when the context is sitting right there.
 Do the thinking silently; output ONLY the reply.`;
 
-function pickModel(message: string): "gpt-4o" | "gpt-4o-mini" {
+function pickModel(message: string): string {
   const hard = /\b(wrong|bad advice|not what i|don'?t give me|hate|quit|give up|can'?t do this|frustrat|useless|nonsense|you said|you told|listen to me|scared|anxious|depress|alone|struggling)\b/i.test(message)
     || message.length > 220;
-  return hard ? "gpt-4o" : "gpt-4o-mini";
+  return hard ? MODEL.strong : MODEL.understand;
 }
 
 export interface MeaningInput {

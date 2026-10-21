@@ -31,6 +31,7 @@ import { eq, and, gte, desc } from "drizzle-orm";
 import { db } from "../db";
 import { users, weightLogs, mealLogs, shadowReplies } from "../../shared/schema";
 import { sastDayStart } from "../sast";
+import { MODEL } from "../ai-offline";
 
 const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
@@ -102,7 +103,7 @@ async function llmRevise(
     const timeoutHandle = setTimeout(() => { revised = null; }, REVISION_TIMEOUT_MS);
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.classify,
       temperature: 0,
       max_tokens: 250,
       messages: [

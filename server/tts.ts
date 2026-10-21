@@ -14,6 +14,7 @@ import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured, type VoiceEmotio
 import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
 import { allowExpensiveOp } from "./usage-governor";
 import { wantsVoiceReplies, worthSpeaking, speechText } from "./numbers-mode";
+import { MODEL } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -65,7 +66,7 @@ export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "w
     }
 
     const mp3 = await openai.audio.speech.create({
-      model: "tts-1",
+      model: MODEL.tts,
       voice: "onyx",
       input: text,
       response_format: "mp3",

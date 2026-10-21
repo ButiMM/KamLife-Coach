@@ -18,6 +18,7 @@ import { gptCosts, chatHistory, adminEvents } from "../shared/schema";
 import { eq, gte, and, sql, isNotNull } from "drizzle-orm";
 import { PRICING } from "../shared/pricing";
 import { sastDayStart } from "./utils";
+import { MODEL } from "./ai-offline";
 
 // ── Rate assumptions (estimates until real invoices land — see the finance deep-dive) ──
 export const USD_ZAR = 18.5;                       // same rate the north-star endpoint uses
@@ -77,11 +78,12 @@ export type SubscriptionTier = "active" | "trial" | "inactive" | string | null |
 
 export interface VisionModelDecision {
   allowed: boolean;
-  model: "gpt-4o" | "gpt-4o-mini";
+  model: string;
   detail: "low" | "auto" | "high";
   maxTokens: number;
   reason: string;
 }
+
 
 export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier): VisionModelDecision {
   const t = (tier || "").toLowerCase();
@@ -91,7 +93,7 @@ export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier
   if (!onboarded) {
     return {
       allowed: false,
-      model: "gpt-4o-mini",
+      model: MODEL.visionLight,
       detail: "low",
       maxTokens: 0,
       reason: "inactive_tier_blocked",
@@ -101,18 +103,18 @@ export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier
   switch (useCase) {
     case "progress_compare":
       return paying
-        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "progress_paid" }
-        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 350, reason: "progress_trial" };
+        ? { allowed: true, model: MODEL.vision, detail: "auto", maxTokens: 400, reason: "progress_paid" }
+        : { allowed: true, model: MODEL.visionLight, detail: "auto", maxTokens: 350, reason: "progress_trial" };
 
     case "food_photo":
       // gpt-4o for paying users — better SA food recognition, fewer "cannot make out" failures
       return paying
-        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "food_paid" }
-        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_trial" };
+        ? { allowed: true, model: MODEL.vision, detail: "auto", maxTokens: 400, reason: "food_paid" }
+        : { allowed: true, model: MODEL.visionLight, detail: "auto", maxTokens: 400, reason: "food_trial" };
 
     case "exercise_classify":
     case "step_ocr":
-      return { allowed: true, model: "gpt-4o-mini", detail: "low", maxTokens: useCase === "step_ocr" ? 50 : 8, reason: useCase };
+      return { allowed: true, model: MODEL.visionLight, detail: "low", maxTokens: useCase === "step_ocr" ? 50 : 8, reason: useCase };
   }
 }
 

@@ -23,6 +23,7 @@ import {
   coerceUnderstanding,
   persistableUnderstanding,
 } from "./state";
+import { MODEL } from "../ai-offline";
 
 const PERCEPTION_SYSTEM = `You are the PERCEPTION layer of a South African WhatsApp coach. You do NOT talk to the client and you do NOT write any reply. Your only job: read the client's new message and the current understanding of them, and return an UPDATED understanding as JSON.
 
@@ -62,7 +63,7 @@ export async function runPerception(openai: OpenAI, input: PerceptionInput): Pro
       observations: withStats.observations,
     };
     const resp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.understand,
       temperature: 0,
       max_tokens: 320,
       response_format: { type: "json_object" },

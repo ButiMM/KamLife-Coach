@@ -28,6 +28,7 @@
 
 import type OpenAI from "openai";
 import { assertAiOnline } from "../ai-offline";
+import { MODEL } from "../ai-offline";
 
 export type DomainClass = "in-domain" | "partially-related" | "out-of-domain" | "safety";
 
@@ -202,7 +203,7 @@ export async function classifyDomain(
   try {
     assertAiOnline("domain_guard");
     const resp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.classify,
       temperature: 0,
       max_tokens: 4,
       messages: [

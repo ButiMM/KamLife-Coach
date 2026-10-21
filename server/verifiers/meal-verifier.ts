@@ -11,6 +11,7 @@
 
 import OpenAI from "openai";
 import { metered } from "../gpt";
+import { MODEL } from "../ai-offline";
 
 // ── OpenAI client (module-level, shared) ─────────────────────────────────────
 const openai = metered(new OpenAI({
@@ -246,7 +247,7 @@ async function runPass3(
   try {
     const resp = await Promise.race([
       openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: MODEL.classify,
         temperature: 0,
         max_tokens: 300,
         response_format: { type: "json_object" },

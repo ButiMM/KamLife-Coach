@@ -21,6 +21,7 @@ import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused, claimProactive } from "./scheduler/shared";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
+import { MODEL } from "./ai-offline";
 
 const openai = metered(new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -234,7 +235,7 @@ RULES:
   try {
     assertAiOnline("weeklyRecap");
     const res = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: MODEL.compose,
       messages: [{ role: "user", content: prompt }],
       max_tokens: 150,
       temperature: 0.7,

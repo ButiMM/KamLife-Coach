@@ -10,6 +10,7 @@
 if (!process.env.DATABASE_URL) { console.log("pg-core-wave1-switch-acceptance: SKIPPED — no DATABASE_URL."); process.exit(0); }
 process.env.OPENAI_API_KEY = "sk-stub"; process.env.OFFLINE_AI = "0"; process.env.NORMALIZER = "off";
 process.env.ENGINE_LIVE = "on"; process.env.PROACTIVE_PAUSED = "true"; process.env.NODE_ENV = "production";
+process.env.MODEL_UNDERSTAND = "understand-711"; process.env.MODEL_COMPOSE = "compose-711"; // #711: one setting per job
 process.env.TWILIO_ACCOUNT_SID = "ACtest00000000000000000000000000"; process.env.TWILIO_AUTH_TOKEN = "test"; process.env.TWILIO_WHATSAPP_NUMBER = "+27000000000";
 const FOUNDER = "whatsapp:+27829438001", TESTER = "whatsapp:+27829438002";
 
@@ -25,6 +26,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
   if (!url.includes("api.openai.com")) return realFetch(input, init);
   const body = typeof init?.body === "string" ? init.body : "";
   let content = "Old coach here, noted.";
+  ((globalThis as any).__models ||= []).push(`${body.includes("say what they want from this turn") ? "understand" : body.includes("You are Coach K, a warm, direct South African") ? "compose" : "other"}:${JSON.parse(body || "{}").model}`);
   if (body.includes("say what they want from this turn")) {
     const msg = JSON.parse(body).messages.at(-1).content as string;
     const bag = { type: "SET_REMINDER", body: "pack my gym bag", when: "tomorrow at 7am" };
@@ -95,6 +97,8 @@ REAL("\npg-core-wave1-switch-acceptance — the new coach answers wave-1 turns, 
 REAL("1. EVERYONE");
 const t1 = await say(TESTER, ASK);
 chk(t1.includes(NEW), "a tester's wave-1 question is answered by the new coach too", t1);
+{ const seen: string[] = (globalThis as any).__models || [];
+  chk(seen.includes("understand:understand-711") && seen.includes("compose:compose-711") && !seen.some(x => /^(understand|compose):gpt-/.test(x)), "#711: the read and the reply each use their own model setting, with no name left in code", JSON.stringify(seen.slice(0, 6))); }
 
 REAL("\n1b. REACH (CTO attack on #445): the old wave-1 handlers stand aside for the switched client");
 for (const q of ["What should I eat tonight?", "How was my week?", "What should I order at KFC?", "Should I take creatine?",
