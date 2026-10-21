@@ -87,8 +87,8 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
     // "I'm not pregnant" are ordinary talk, and "I'm expecting" needs a baby after it.
     context: "pregnancy", refer: true, demand: "pause",
     // #705: and the client's own disclosure in Setswana/Sesotho, isiZulu, isiXhosa and Afrikaans, first person only:
-    // "o imile" / "ukhulelwe" (she is) stay ordinary talk, and the negatives ("angikhulelwe", "ek is nie swanger nie") don't match.
-    re: /\b(?:(?:i'?m|i\s+am)\s+(?:currently\s+|now\s+)?(?:\d{1,2}\s+(?:weeks?|months?)\s+)?pregnant|(?:i'?m|i\s+am|we'?re|we\s+are)\s+expecting\s+(?:a\s+(?:baby|child)|twins|(?:my|our)\s+(?:first|second|third)\b)|my\s+pregnancy|(?:first|second|third|1st|2nd|3rd)\s+trimester|ke\s+(?:imile|ithwele|na\s+le\s+ngwana\s+mo\s+mpeng)|ngikhulelwe|ndikhulelwe|ek\s+is\s+(?:al\s+)?(?:\d{1,2}\s+weke\s+)?swanger)\b/i,
+    // "o imile" / "ukhulelwe" (she is) and the past "ke ne ke imile" (I was) stay ordinary talk, and the negatives ("angikhulelwe", "ek is nie swanger nie") don't match.
+    re: /\b(?:(?:i'?m|i\s+am)\s+(?:currently\s+|now\s+)?(?:\d{1,2}\s+(?:weeks?|months?)\s+)?pregnant|(?:i'?m|i\s+am|we'?re|we\s+are)\s+expecting\s+(?:a\s+(?:baby|child)|twins|(?:my|our)\s+(?:first|second|third)\b)|my\s+pregnancy|(?:first|second|third|1st|2nd|3rd)\s+trimester|(?<!\bne\s+)ke\s+(?:imile|imme|ithwele|na\s+le\s+ngwana\s+mo\s+mpeng)|ngikhulelwe|ndikhulelwe|ek\s+is\s+(?:al\s+)?(?:\d{1,2}\s+weke\s+)?swanger)\b/i,
   },
 
   // ── Hard life — the common case ───────────────────────────────────────────────────
