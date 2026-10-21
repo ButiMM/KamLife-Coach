@@ -6,27 +6,34 @@
  * done". Losing a client's weigh-in because the model hiccupped is the data loss we never accept. Food is not here: a
  * plate needs the read. Anything else gets the honest outage line from the caller.
  */
-import { isAskingNotReporting, looksLikeWeightReport } from "../utils";
+import { isAskingNotReporting, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport } from "../utils";
 
 export async function reportFloor(ctx: { phone: string; message: string; m: string; user: any; sourceMessageId?: string }): Promise<string | null> {
   // The reports only: "84kg. what should I eat?" keeps the 84kg; the question waits for the coach.
   const message = ctx.message.split(/(?<=[.!?\n])\s+/).filter(c => c.trim() && !isAskingNotReporting(c)).join(" ").trim();
   if (!message) return null;
   const t = { ...ctx, message, m: message.toLowerCase().replace(/\s+/g, " ").trim() };
+  // EVERY PART A REPORT, OR NONE OF IT (#701, Codex P1): "drank 500ml of water and took my magnesium" carries a fact the
+  // floor doesn't own, so nothing is written here and the whole turn goes to the doors below, which save both.
+  const parts = t.m.split(/[.!?\n,;]+|\s+(?:and|then|&)\s+/).map(p => p.trim())
+    .filter(p => p && !(/^(?:today|tonight|this morning|last night|yesterday|just now|so far|coach|hi|hey|morning)$/).test(p));
+  if (!parts.every(p => looksLikeWeightReport(p) || weighs(p) || looksLikeStepsReport(p) || looksLikeWaterReport(p) || slept(p) || trained(p))) return null;
   const saved: string[] = [];
-  const slept = await (await import("../handlers/lifecycle")).logSleep(t.user, t.message, t.m);
-  if (slept) saved.push(slept);
+  const sleep = await (await import("../handlers/lifecycle")).logSleep(t.user, t.message, t.m);
+  if (sleep) saved.push(sleep);
   const water = await (await import("../handlers/water")).handleWater(t); // the water owner, with its own repeat guard
   if (water) saved.push(water);
   const steps = await (await import("../handlers/steps")).handleStepReport({ ...t, normalizedQuestion: false, commitStep: () => {}, hasStepPart: () => false });
   if (steps.kind !== "none") saved.push(steps.reply);
   // The weigh-in and the session both live in the workout owner; it is asked only when the message is one of them.
   // The workout owner finds the weigh-in clause itself ("I'm trying to lose weight, weighed 84kg this morning").
-  const weighs = looksLikeWeightReport(t.m) || /\b\d{2,3}(?:\.\d+)?\s*kgs?\b|\bweigh(?:ed|s|ing)?\b/i.test(t.m);
-  const trained = (/\b(?:workout|session|training|gym)\b[^.!?]{0,20}\b(?:done|complete|completed|finished)\b|^\s*(?:done|finished)\b|\b(?:trained|worked out|did (?:my )?(?:workout|session|training))\b/i).test(t.m);
-  if (weighs || trained) {
+  if (looksLikeWeightReport(t.m) || weighs(t.m) || trained(t.m)) {
     const r = await (await import("../handlers/workout")).handleWorkoutCommands(t);
     if (r) saved.push(r);
   }
   return saved.length ? saved.join("\n\n") : null;
 }
+
+const weighs = (text: string) => (/\b\d{2,3}(?:\.\d+)?\s*kgs?\b|\bweighed\b|\bweigh(?:s|ing)?\s+(?:\d|in\b)/i).test(text);
+const trained = (text: string) => (/\b(?:workout|session|training|gym)\b[^.!?]{0,20}\b(?:done|complete|completed|finished)\b|^\s*(?:done|finished)\b|\b(?:trained|worked out|did (?:my )?(?:workout|session|training))\b/i).test(text);
+const slept = (text: string) => (/\b(?:slept|geslaap)\b|\bsleep\b[^.!?]{0,20}\b\d|\b(?:bad|rough|terrible)\s+night\b|\bcouldn'?t\s+sleep\b|\binsomnia\b/i).test(text);

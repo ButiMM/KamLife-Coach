@@ -369,6 +369,10 @@ REAL("\n4p. THE MODEL IS DOWN: EACH REPORT IS STILL SAVED BY ITS OWN TOOL (the r
     ["workout done", "Workout done", async () => (await one("SELECT count(*)::int n FROM workout_logs WHERE user_id = $P")).n === 1],
   ];
   for (const [kind, said, saved] of cases) { const r = await say(F, said); chk(await saved() && !r.includes(NEW), `model down: "${said}" saves the ${kind}`, r.slice(0, 160)); }
+  // #701 Codex P1: a fact the floor doesn't own beside a report: the floor stands aside and the doors save both.
+  const both = await say(F, "drank 500ml of water and took my magnesium");
+  const water = Number((await one("SELECT today_water w FROM users WHERE id = $P")).w), supp = (await one("SELECT count(*)::int n FROM chat_history WHERE user_id = $P AND intent = 'SUPPLEMENT_LOG'")).n;
+  chk(water === 2.5 && supp === 1, "model down: \"drank 500ml of water and took my magnesium\" saves the water and the supplement", `water=${water} supp=${supp} | ${both.slice(0, 160)}`);
   (globalThis as any).__modelDown = false; await pool.query("DELETE FROM users WHERE phone_number = $1", [F]); }
 
 REAL("\n4h. SICK AND BACK THROUGH THE FRONT DOOR (A15)");
