@@ -165,6 +165,7 @@ const PHRASES = [
   "Ke kopa o se ka wa nthomelela melaetsa gape.",           // Setswana
   "Ke kopa o se ke wa nthomella melaetsa hape.",            // Sesotho
   "Moenie vir my boodskappe stuur nie, asseblief.",         // Afrikaans
+  "Ndicela ungandithumeleli imiyalezo yenu",                // isiXhosa "your messages": every message, not a topic (#723 review)
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
@@ -259,6 +260,10 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   const Q = await client("Snack Question");
   await say(Q, "How do I stop snacking at night?");
   chk((await proactiveReaches(Q)).length === 3, "\"how do I stop snacking?\" is a question, not an opt-out");
+  // #721: messages ABOUT one thing, in isiXhosa, is a topic: every other message keeps coming.
+  const T721 = await client("Topic Xhosa");
+  await say(T721, "Ndicela ungandithumeleli imiyalezo ye-calories");
+  chk((await proactiveReaches(T721)).length === 3, "\"ungandithumeleli imiyalezo ye-calories\" refuses a topic, not every message (#721)");
   // #714 review: "why aren't you sending me messages?" in isiXhosa asks for messages; it is not the stop.
   const W = await client("Asks Why");
   await say(W, "Kutheni ungandithumeleli imiyalezo?");
