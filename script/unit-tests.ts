@@ -5748,6 +5748,7 @@ test("scope: a mention inside coaching, or a word with a second meaning, is not 
     "Write me a letter to my future self about why I'm losing weight", "Can you write me a poem to motivate me for my workout tomorrow",
     "Can you write me a script for my gym routine?", "Please write my CV. Also I walked 8000 steps today and weighed 82kg",
     "Write me an essay about climate change. Also I walked 8000 steps today",
+    "Can you write a letter to my coach asking to deload next week?", // #727 review: "my coach" is not a greeting
   ]) assert.equal(offDomainRedirect(m), null, `must not decline: "${m}"`);
 });
 test("scope: a classifier outage is not a verdict — no client is refused because the gate is down", async () => {

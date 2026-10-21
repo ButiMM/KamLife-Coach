@@ -103,9 +103,10 @@ export function offDomainRedirect(message: string, ongoing = false): string | nu
   if (/\b(?:i\s+(?:just\s+)?)?(?:walked|ran|jogged|cycled|swam|did|weighed|weigh|drank|had(?!\s+to\b))\b[^.?!;,]{0,20}?\b\d[\d,.]*\s*(?:k\b|kg|kgs|km|steps|litres?|l\b|ml|glasses|reps|minutes|mins?)(?!\s+[a-z]*(?:parcels?|bags?|boxes|deliver\w*|race|marathon|history)\b)|(?:^|[.?!]\s*|\b(?:and|also)\s+)\d[\d,.]*\s*k?\s*steps\b/i.test(t)) return null;
   // Hard artefacts are declined whatever they name; a letter, poem, story, speech or script about their training,
   // weight or motivation is coaching ("write me a letter to my future self about why I'm losing weight", #679).
-  // Calling us "coach" or saying hello doesn't make a cousin's birthday poem coaching (#683): the ask is judged without them.
+  // Calling us "coach" or saying hello doesn't make a cousin's birthday poem coaching (#683): the ask is judged without the
+  // vocative. "A letter to my coach asking to deload" keeps its coach: only a leading "coach,"/"hi" is dropped (#727 review).
   if (OFF_DOMAIN_ASK_RE.test(t) && (/^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:write|draft|create|make|do)\s+(?:me\s+|us\s+)?(?:an?\s+|my\s+|the\s+)?(?:essay|assignment|business plan|cv|cover letter|motivation letter|email|code)\b/i.test(t)
-      || !isObviouslyInDomain(t.replace(/\b(?:coach(?:\s+k)?|hi|hello|hey)\b[,!]?/gi, " ")))) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
+      || !isObviouslyInDomain(t.replace(/(?:^|[.!?]\s*)\s*(?:(?:hi|hello|hey)\s+)?(?:coach(?:\s+k)?\b[,!]?|(?:hi|hello|hey)\b[,!]?)/gi, " ")))) return ongoing ? REDIRECT_IN_CONVERSATION : REDIRECT;
   return null;
 }
 
