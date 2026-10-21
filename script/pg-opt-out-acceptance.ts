@@ -259,6 +259,10 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   const Q = await client("Snack Question");
   await say(Q, "How do I stop snacking at night?");
   chk((await proactiveReaches(Q)).length === 3, "\"how do I stop snacking?\" is a question, not an opt-out");
+  // #714 review: "why aren't you sending me messages?" in isiXhosa asks for messages; it is not the stop.
+  const W = await client("Asks Why");
+  await say(W, "Kutheni ungandithumeleli imiyalezo?");
+  chk((await proactiveReaches(W)).length === 3, "\"Kutheni ungandithumeleli imiyalezo?\" is a question, not an opt-out");
   const O = OPTED[0];
   const r = await say(O, "What should I eat for dinner?");
   chk(r.length > 0, "a client who opted out and then writes to us still gets a reply", `reply=${JSON.stringify(r)}`);
