@@ -350,11 +350,17 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
 
   // ---- HEART CONDITION CLEARANCE GATE ----
   // Users with heart_condition must confirm doctor clearance before receiving workouts
-  if (user.doctorClearanceRequired && !/(doctor|cleared|clearance|got clearance|doctor said|my doctor|spoke to doctor|physician|cardiologist)/i.test(m)) {
+  // Only the clearance itself lifts it: "I haven't seen my doctor yet, show me today's workout" is still held (#717 review).
+  // A negation is not the clearance: "I'm not cleared by my doctor yet" stays held (#717 ATTACK @ 4bcac7e).
+  const confirmsClearance = (/(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i).test(m)
+    && !(/\b(?:not|never)\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|n'?t\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|\bcleared\s+(?:me\s+)?yet\b/i).test(m);
+  if (user.doctorClearanceRequired && !confirmsClearance) {
     const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
-    if (conditions.includes("heart_condition")) {
+    {
       const name = getDisplayName(user) || "there";
-      const clearanceMsg = `${name}, your profile shows a heart condition. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
+      // The hold is set at onboarding for a heart condition, or by the acute floor after chest symptoms (#706).
+      const why = conditions.includes("heart_condition") ? "your profile shows a heart condition" : "you told me about chest symptoms";
+      const clearanceMsg = `${name}, ${why}. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
       // Allow food/step/weight questions and crisis through
       const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m);
       if (!allowThrough) {
@@ -364,7 +370,7 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
     }
   }
   // Accept doctor clearance confirmation
-  if (user.doctorClearanceRequired && /(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i.test(m)) {
+  if (user.doctorClearanceRequired && confirmsClearance) {
     await db.update(users).set({ doctorClearanceRequired: false }).where(eq(users.phoneNumber, phone));
     const name = getDisplayName(user) || "there";
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;

@@ -67,8 +67,11 @@ export async function readHeldConstraints(
     // gate standing between an unmigrated sender and a client who said they were done for the day.
     // The id is used when the caller has one; otherwise the user is resolved by phone, exactly as
     // this function did before it read a table.
-    const uid = (client as any)?.id
-      ?? (await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1))[0]?.id;
+    const row = (client as any)?.id ? null
+      : (await db.select({ id: users.id, clearanceHold: users.doctorClearanceRequired }).from(users).where(eq(users.phoneNumber, phone)).limit(1))[0];
+    const uid = (client as any)?.id ?? row?.id;
+    // THE HEART-CLEARANCE HOLD (#706): no training until a doctor clears them, for every proactive and outbound reader.
+    const clearanceHold = (client as any)?.doctorClearanceRequired === true || row?.clearanceHold === true;
     if (!uid) return { ...NO_CONSTRAINTS, sick };
     const rows = await db.select().from(dailyConstraints)
       .where(and(eq(dailyConstraints.userId, uid), eq(dailyConstraints.day, day)))
@@ -85,7 +88,7 @@ export async function readHeldConstraints(
         .limit(1);
       if (done.length > 0) trainingDeclined = false;
     }
-    return { foodDayClosed: newest("food")?.state === "asserted", trainingDeclined, sick };
+    return { foodDayClosed: newest("food")?.state === "asserted", trainingDeclined: trainingDeclined || clearanceHold, sick };
   } catch (e: any) {
     console.warn(`[HELD_CONSTRAINTS] unreadable for ${String(phone).slice(-8)}: ${e?.message || e}`);
     return { ...NO_CONSTRAINTS, sick };
