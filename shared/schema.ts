@@ -1056,3 +1056,13 @@ export interface FlaggedUser extends User {
   flagReason: "inactive_7_days" | "plateau_2_weeks";
   lastLogDate: string | null;
 }
+
+// Anonymous daily counts for the /start bio-link page (step reached, fit or not, source tag).
+// No names, answers or health data are ever stored here.
+export const startFunnelCounts = pgTable("start_funnel_counts", {
+  day: date("day").notNull(),
+  step: text("step").notNull(),
+  outcome: text("outcome").notNull().default(""),
+  src: text("src").notNull().default("LINK"),
+  n: integer("n").notNull().default(0),
+});
