@@ -5,7 +5,10 @@ const SPOTS_OPEN = true;
 const REPLY_HOURS = "6am and 8pm";
 // Add only real client quotes with permission. No sample or placeholder quotes.
 // Each entry requires {firstName, quote, consent: true}; at most two are shown.
-const CLIENT_QUOTES = [];
+const CLIENT_QUOTES = [
+  {firstName:"Tshiamo",quote:"I feel like a superhero ever since I joined.",consent:true},
+  {firstName:"Puntsa",quote:"The abs are coming!",consent:true},
+];
 // Supply the real public Channel URL to enable the starter follow button. Never a chat number.
 const WHATSAPP_CHANNEL_URL = "";
 // true: people not training yet, or on-and-off and needing consistency help, can message the coach (tagged C).
