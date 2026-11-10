@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { text as textBody } from "express";
 import { db } from "../db";
 import { gptCosts, adminEvents } from "../../shared/schema";
 import { splitWhatsAppBody } from "../utils";
@@ -12,6 +13,7 @@ import { PRICING } from "../../shared/pricing";
 // The money + engagement + quality layer the VC review asked for. Detailed funnel/
 // retention live at /api/dashboard/funnel; this is the CFO + habit + quality view.
 export function registerAdminMetrics(app: Express) {
+  registerFunnelRoutes(app);
   // ── NORTH-STAR METRICS (2026-07-14, VC review: "measure everything, publish it
   // internally — without numbers everything sounds theoretical"). ONE consolidated
   // view of the needles the founder actually moves: unit economics (MRR, AI cost per
@@ -194,4 +196,66 @@ export function templateOf(text: string): string | null {
     if (parts.length && parts.every(p => { const i = text.indexOf(p, from); if (i < 0) return false; from = i + p.length; return true; })) return t.name;
   }
   return null;
+}
+
+/**
+ * Anonymous counts for the /start bio-link page: how many people reach each step, how many end as a
+ * fit, and which bio they came from. The page sends {step, outcome, src} with sendBeacon (text/plain).
+ * Only whitelisted values are counted, so nothing a visitor typed or answered can be stored.
+ */
+const STEPS = new Set(["landing", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "name", "outcome", "contact"]);
+const OUTCOMES = new Set(["", "FIT_OPEN", "FIT_FULL", "OTHER"]);
+const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB", "LINK"]);
+
+export function parseFunnelEvent(raw: unknown): { step: string; outcome: string; src: string } | null {
+  let v: any = raw;
+  if (typeof raw === "string") {
+    if (raw.length > 300) return null;
+    try { v = JSON.parse(raw); } catch { return null; }
+  }
+  if (!v || typeof v !== "object") return null;
+  const step = String(v.step ?? "");
+  const outcome = String(v.outcome ?? "");
+  const src = String(v.src ?? "LINK");
+  if (!STEPS.has(step) || !OUTCOMES.has(outcome) || !SOURCES.has(src)) return null;
+  return { step, outcome, src };
+}
+
+// A small per-address brake so one visitor cannot inflate the counts.
+const hits = new Map<string, { t: number; n: number }>();
+function allowed(ip: string): boolean {
+  const now = Date.now();
+  const h = hits.get(ip);
+  if (!h || now - h.t > 60_000) {
+    if (hits.size > 5000) hits.clear();
+    hits.set(ip, { t: now, n: 1 });
+    return true;
+  }
+  return ++h.n <= 60;
+}
+
+function registerFunnelRoutes(app: Express) {
+  app.post("/api/funnel", textBody({ type: () => true, limit: "1kb" }), async (req, res) => {
+    res.status(204).end();
+    try {
+      const body = typeof req.body === "string" || (req.body && Object.keys(req.body).length) ? req.body : null;
+      const ev = parseFunnelEvent(body);
+      if (!ev || !allowed(req.ip || "?")) return;
+      await db.execute(sql`
+        INSERT INTO start_funnel_counts (day, step, outcome, src, n)
+        VALUES ((NOW() AT TIME ZONE 'Africa/Johannesburg')::date, ${ev.step}, ${ev.outcome}, ${ev.src}, 1)
+        ON CONFLICT (day, step, outcome, src) DO UPDATE SET n = start_funnel_counts.n + 1`);
+    } catch (e: any) {
+      console.error("[FUNNEL]", e?.message);
+    }
+  });
+
+  app.get("/api/admin/funnel", requireAdminKey, async (req, res) => {
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 14));
+    const r: any = await db.execute(sql`
+      SELECT day, step, outcome, src, n FROM start_funnel_counts
+      WHERE day >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date - ${days}::int
+      ORDER BY day DESC, step, src`);
+    res.json({ days, rows: r.rows ?? r });
+  });
 }
