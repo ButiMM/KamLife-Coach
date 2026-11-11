@@ -18,5 +18,12 @@ check("an unknown source is dropped", parseFunnelEvent({ step: "landing", outcom
 check("junk is dropped", parseFunnelEvent("not json") === null && parseFunnelEvent(null) === null);
 check("an oversized body is dropped", parseFunnelEvent(JSON.stringify({ step: "landing", pad: "x".repeat(400) })) === null);
 
+// The pages must not contradict each other on billing or brand line.
+const { readFileSync } = await import("node:fs");
+const startJs = readFileSync("client/public/start/app.js", "utf8");
+const payHtml = readFileSync("client/public/pay/index.html", "utf8");
+check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
+check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
