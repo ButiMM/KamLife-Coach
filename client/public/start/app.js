@@ -10,7 +10,7 @@ const CLIENT_QUOTES = [
   {firstName:"Puntsa",quote:"The abs are coming!",consent:true},
 ];
 // Supply the real public Channel URL to enable the starter follow button. Never a chat number.
-const WHATSAPP_CHANNEL_URL = "";
+const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/0029VbDsTWZJP20vhfLR6a0K";
 // true: people not training yet, or on-and-off and needing consistency help, can message the coach (tagged C).
 // Set to false when the inbox is flooded: they then get the free 14-day starter instead.
 const OPEN_TO_STARTERS = true;
@@ -84,6 +84,7 @@ function landingSectionsHtml(){
  +`<section class="lx-sec lx-get" aria-labelledby="getTitle"><p class="lx-kicker">What you get</p><h2 id="getTitle" class="brand-serif">Coaching that fits your real life.</h2><div class="lx-cards">${gets.map(([t,d])=>`<div class="lx-card"><strong>${t}</strong><p>${d}</p></div>`).join("")}</div></section>`
  +`<section class="lx-sec lx-commit" aria-labelledby="commitTitle"><p class="lx-kicker">Before you start</p><h2 id="commitTitle" class="brand-serif">Give it 90 days.</h2><p class="lx-commit-lead">The first month usually feels great. The scale moves, the routine is fresh and it’s easy to think you’ve got it. That’s exactly when most people stop, and it all slowly comes back.</p><ol class="lx-phases"><li><span>Month 1</span><strong>The quick start</strong><p>New routine, early changes. Mostly momentum.</p></li><li><span>Month 2</span><strong>The real test</strong><p>Weekends, busy weeks, a slow scale. We adjust instead of quitting.</p></li><li><span>Month 3</span><strong>It sticks</strong><p>You know how to eat and train on your own, even when life gets busy.</p></li></ol><p class="lx-commit-note">I’ll always be honest with you: stopping after one month is the most common reason results don’t last. Coaching is month to month, but I strongly recommend at least 3 months.</p></section>`
  +`<section class="lx-sec lx-price" aria-labelledby="priceTitle"><div class="lx-pricecard"><p class="lx-kicker">Founding rate</p><h2 id="priceTitle" class="brand-serif">R${PRICE}<span>/month</span></h2><ul><li>Month to month. Cancel anytime.</li><li>Or R700 for 3 months (save R50).</li><li>EFT only. No card details, ever.</li><li>Personal replies between ${escapeHtml(REPLY_HOURS)}.</li></ul><button class="lx-cta" id="begin2" type="button"><span class="lx-cta-text">Start on WhatsApp<small>7 quick questions first · under a minute</small></span><span aria-hidden="true">→</span></button></div></section>`
+ +(WHATSAPP_CHANNEL_URL?`<section class="lx-sec lx-channel"><div class="lx-channelcard"><p class="lx-kicker">Not ready yet?</p><h2 class="brand-serif">Follow the KamLife Channel.</h2><p>Real plates, real training and client wins, every day. Followers hear first when new spots open.</p><a class="lx-channel-btn" href="${escapeHtml(WHATSAPP_CHANNEL_URL)}" rel="noopener noreferrer">Follow on WhatsApp <span aria-hidden="true">↗</span></a></div></section>`:"")
  +`<section class="lx-sec lx-faq" aria-labelledby="faqTitle"><p class="lx-kicker">Questions</p><h2 id="faqTitle" class="brand-serif">Good to know.</h2>${faqs.map(([q,ans])=>`<details><summary>${q}</summary><p>${ans}</p></details>`).join("")}</section>`;
 }
 function testimonialsHtml(quotes=CLIENT_QUOTES){
