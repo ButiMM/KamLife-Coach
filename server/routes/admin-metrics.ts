@@ -234,6 +234,40 @@ function allowed(ip: string): boolean {
   return ++h.n <= 60;
 }
 
+
+// Read-only page watch: aggregate counts only (no answers, no people), for the scheduled analysis.
+type FunnelRow = { day: string; step: string; outcome: string; src: string; n: number };
+const ORDER = ["landing", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "name", "outcome", "contact"];
+export function summarizeFunnel(rows: FunnelRow[], today: string) {
+  const dayStr = (d: any) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+  const yesterday = new Date(Date.parse(today + "T00:00:00Z") - 86_400_000).toISOString().slice(0, 10);
+  const period = (keep: (d: string) => boolean) => {
+    const steps: Record<string, number> = {}; const bySource: Record<string, { landing: number; contact: number }> = {};
+    const outcomes: Record<string, number> = {};
+    for (const r of rows) {
+      const d = dayStr(r.day); if (!keep(d)) continue; const n = Number(r.n) || 0;
+      steps[r.step] = (steps[r.step] ?? 0) + n;
+      if (r.step === "outcome") outcomes[r.outcome || "NONE"] = (outcomes[r.outcome || "NONE"] ?? 0) + n;
+      const s = (bySource[r.src] ??= { landing: 0, contact: 0 });
+      if (r.step === "landing") s.landing += n; if (r.step === "contact") s.contact += n;
+    }
+    const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : null);
+    const v = (k: string) => steps[k] ?? 0;
+    let biggestDrop: { from: string; to: string; lostPct: number } | null = null;
+    for (let i = 0; i < ORDER.length - 2; i++) {
+      const a = v(ORDER[i]), b = v(ORDER[i + 1]);
+      if (a >= 5) { const lost = Math.round(((a - b) / a) * 100); if (!biggestDrop || lost > biggestDrop.lostPct) biggestDrop = { from: ORDER[i], to: ORDER[i + 1], lostPct: lost }; }
+    }
+    const fits = (outcomes.FIT_OPEN ?? 0) + (outcomes.FIT_FULL ?? 0);
+    return { visits: v("landing"), started: v("q1"), finished: v("outcome"), whatsappClicks: v("contact"),
+      startRatePct: pct(v("q1"), v("landing")), finishRatePct: pct(v("outcome"), v("q1")),
+      fitRatePct: pct(fits, v("outcome")), visitToWhatsappPct: pct(v("contact"), v("landing")),
+      outcomes, bySource, steps, biggestDrop };
+  };
+  const weekStart = new Date(Date.parse(today + "T00:00:00Z") - 6 * 86_400_000).toISOString().slice(0, 10);
+  return { today, todaySoFar: period(d => d === today), yesterday: period(d => d === yesterday), last7Days: period(d => d >= weekStart && d <= today) };
+}
+
 function registerFunnelRoutes(app: Express) {
   app.post("/api/funnel", textBody({ type: () => true, limit: "1kb" }), async (req, res) => {
     res.status(204).end();
@@ -257,5 +291,17 @@ function registerFunnelRoutes(app: Express) {
       WHERE day >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date - ${days}::int
       ORDER BY day DESC, step, src`);
     res.json({ days, rows: r.rows ?? r });
+  });
+
+  app.get("/api/funnel/watch", async (req, res) => {
+    const key = process.env.FUNNEL_WATCH_KEY;
+    const given = String(req.query.k ?? "");
+    if (!key || key.length < 24 || given !== key) return res.status(404).end();
+    const r: any = await db.execute(sql`
+      SELECT day, step, outcome, src, n FROM start_funnel_counts
+      WHERE day >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date - 8`);
+    const t: any = await db.execute(sql`SELECT ((NOW() AT TIME ZONE 'Africa/Johannesburg')::date)::text AS d`);
+    const today = String((t.rows ?? t)[0].d);
+    res.set("Cache-Control", "no-store").json(summarizeFunnel(r.rows ?? r, today));
   });
 }
