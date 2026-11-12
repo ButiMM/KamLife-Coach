@@ -30,5 +30,7 @@ const { isKamlifeDomain } = await import("../server/kamlife-domain");
 check("www.kamlife.co.za and kamlife.co.za go to /start", isKamlifeDomain("www.kamlife.co.za") && isKamlifeDomain("KamLife.co.za:443"));
 check("the Railway address keeps its own root", !isKamlifeDomain("kamlife-coach-production.up.railway.app") && !isKamlifeDomain(undefined));
 
+check("no page says 'first 100 clients' or 'founding rate'", !/first 100 clients|founding rate/i.test(startJs + payHtml));
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
