@@ -26,10 +26,11 @@ check("the start page no longer says billing is on the 1st", !startJs.includes("
 check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
 
 // kamlife.co.za opens on the /start page, not the Coach K app.
-const { isKamlifeDomain } = await import("../server/kamlife-domain");
+const { isKamlifeDomain } = await import("../server/static");
 check("www.kamlife.co.za and kamlife.co.za go to /start", isKamlifeDomain("www.kamlife.co.za") && isKamlifeDomain("KamLife.co.za:443"));
 check("the Railway address keeps its own root", !isKamlifeDomain("kamlife-coach-production.up.railway.app") && !isKamlifeDomain(undefined));
 
+check("no page says 'first 100 clients' or 'founding rate'", !/first 100 clients|founding rate/i.test(startJs + payHtml));
 // The page watch summary is counts only and finds where people drop off.
 const { summarizeFunnel } = await import("../server/routes/admin-metrics");
 const sum = summarizeFunnel([
