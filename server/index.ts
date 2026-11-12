@@ -9,6 +9,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setStartupPhase, registerStartupGate } from "./routes/health";
 import { serveStatic } from "./static";
+import { kamlifeDomainRoot } from "./kamlife-domain";
 import { createServer } from "http";
 import { initScheduler } from "./scheduler";
 import { initFoodsTable } from "./foods";
@@ -187,6 +188,8 @@ export function log(message: string, source = "express") {
 
   console.log(`${formattedTime} [${source}] ${message}`);
 }
+
+app.use(kamlifeDomainRoot);
 
 app.use((req, res, next) => {
   const start = Date.now();
