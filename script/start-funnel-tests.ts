@@ -25,5 +25,10 @@ const payHtml = readFileSync("client/public/pay/index.html", "utf8");
 check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
 check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
 
+// kamlife.co.za opens on the /start page, not the Coach K app.
+const { isKamlifeDomain } = await import("../server/kamlife-domain");
+check("www.kamlife.co.za and kamlife.co.za go to /start", isKamlifeDomain("www.kamlife.co.za") && isKamlifeDomain("KamLife.co.za:443"));
+check("the Railway address keeps its own root", !isKamlifeDomain("kamlife-coach-production.up.railway.app") && !isKamlifeDomain(undefined));
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
