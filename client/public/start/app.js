@@ -36,7 +36,7 @@ function routeAnswers(a,spotsOpen){
  const notYetConsistent=a.train==="none"||(a.train==="onoff"&&a.commit==="support");
  // Flood mode only: when OPEN_TO_STARTERS is false these profiles get the free starter instead of coach contact.
  if(notYetConsistent&&!OPEN_TO_STARTERS)return {outcome:"STARTER",grade:null};
- if(a.start==="looking")return {outcome:"LOOKING",grade:null};
+ // "Just exploring" is context, not a rejection: their message tells the coach they are still exploring.
  if(a.price==="no")return {outcome:"BUDGET",grade:null};
  if(["trainonly","no"].includes(a.commit))return {outcome:"NOT_READY",grade:null};
  // Goal and perceived cause are context, never rejection criteria.
@@ -106,7 +106,6 @@ function renderOutcome(result,a,name){
  case "GUARDIAN":badge="A parent or guardian first";title=`${n}, let's involve your parent or guardian.`;body="This quick intake is for adults. Coaching for someone under 18 needs a separate conversation with a parent or guardian involved.";extra="<p>Please ask your parent or guardian to help you find suitable support. This page won’t sign you up or ask for payment.</p>";break;
  case "NOT_READY":badge=a.commit==="trainonly"?"A different kind of help":"Whenever you're ready";title=`${n}, thanks for being straight with me.`;body=a.commit==="trainonly"?"This offer includes food guidance and regular check-ins alongside training. If you only want a workout plan, I don't want you paying for coaching you don't want.":"You don't have to force it today. This coaching works through honest updates and trying realistic changes together. Come back when you feel ready for that.";extra=`<div class="card"><h3>A useful next step</h3><p>Think about one part of your routine you'd like help with. You don't need to have the answer before asking for help.</p></div>${channelFollowHtml()}`;break;
  case "BUDGET":badge="No stress";title=`${n}, I respect that.`;body="I'd rather you keep your money than stretch for coaching. I'm building Coach K, a KamLife option for a smaller budget, built on how I coach. Follow the KamLife Channel below. That's where I'll announce it first.";extra=`<div class="card"><h3>3 things my paying clients work on</h3><p><strong>01 · Get stronger over time.</strong><br>Good form first. Add reps or weight when you're ready.</p><p><strong>02 · Include protein with meals.</strong><br>Chicken, eggs, fish, meat or beans all count.</p><p><strong>03 · Keep moving between sessions.</strong><br>Build a walking routine that fits your day.</p></div>${channelFollowHtml()}`;break;
- case "LOOKING":badge="When you're ready";title=`All good, ${n}.`;body="Take your time. When you're ready to start, come back to this link and we'll check if we're a good fit.";extra=channelFollowHtml();break;
  default:return "";
  }
  let html=`<span class="badge">${badge}</span><h1>${title}</h1><p>${body}</p>${extra}`;
@@ -114,7 +113,7 @@ function renderOutcome(result,a,name){
  return html+'<button class="restart" type="button" id="restart">Start again</button>';
 }
 // No health- or age-derived result is transmitted: MEDICAL and GUARDIAN share the OTHER counter.
-const COUNTED_OUTCOMES=["FIT_OPEN","FIT_FULL","BUDGET","LOOKING","NOT_READY"];
+const COUNTED_OUTCOMES=["FIT_OPEN","FIT_FULL","BUDGET","NOT_READY"];
 let landingCounted=false;
 function count(step,outcome=""){try{if(step==="landing"){if(landingCounted)return;landingCounted=true;}if(navigator.doNotTrack==="1"||navigator.globalPrivacyControl===true)return;const safe=COUNTED_OUTCOMES.includes(outcome)?outcome:outcome?"OTHER":"";navigator.sendBeacon?.("/api/funnel",JSON.stringify({step,outcome:safe,src:SRC}));}catch{}}
 let answers={},name="",screen="landing",trail=[],advanceTimer=null,fallbackTimer=null;

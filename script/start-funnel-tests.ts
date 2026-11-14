@@ -66,7 +66,32 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
   check(`every non-health result has a WhatsApp or Channel button (${combos.length} combinations)`, combos.length === 21600 && stranded.length === 0);
 }
 check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
-check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "LOOKING", src: "TT" })?.step === "channel");
+check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "BUDGET", src: "TT" })?.step === "channel");
+{
+  const cut = startJs.indexOf("// No health- or age-derived result");
+  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {routeAnswers,messageFor};")({ hash: "", origin: "https://www.kamlife.co.za" });
+  const explorer = { goal: "weight", train: "home", need: "food", commit: "ready", start: "looking", med: "none", price: "yes" };
+  const r = page.routeAnswers(explorer, true);
+  check("someone just exploring, otherwise a fit, reaches the coach and says they're exploring",
+    r.outcome === "FIT_OPEN" && page.messageFor(explorer, "Lerato", r).includes("Start: I'm just exploring for now"));
+}
+
+
+// The start page promises video demos for gym and home: every exercise on the plan page has one.
+{
+  const w: any = {};
+  new Function("window", readFileSync("client/public/plan/programmes.js", "utf8"))(w);
+  const noVideo: string[] = [];
+  for (const [key, text] of Object.entries(w.KAMLIFE_PROGRAMMES as Record<string, string>)) {
+    const lines = text.split("\n");
+    lines.forEach((l, i) => {
+      if (!/^\d️⃣/u.test(l)) return;
+      const next = lines.slice(i + 1, i + 3).find(x => /^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/.test(x.trim()));
+      if (!next) noVideo.push(`${key}: ${l}`);
+    });
+  }
+  check(`every plan page exercise has a video${noVideo.length ? ` (missing: ${noVideo.slice(0, 3).join("; ")})` : ""}`, noVideo.length === 0);
+}
 
 // Since 14 Nov people not training yet can reach the coach, so the page and its share preview must not say it's only for people already training.
 check("the landing page and share preview welcome people who are just starting",
