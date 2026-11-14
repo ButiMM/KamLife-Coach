@@ -93,5 +93,9 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   check(`every plan page exercise has a video${noVideo.length ? ` (missing: ${noVideo.slice(0, 3).join("; ")})` : ""}`, noVideo.length === 0);
 }
 
+// Since 14 Nov people not training yet can reach the coach, so the page and its share preview must not say it's only for people already training.
+check("the landing page and share preview welcome people who are just starting",
+  !/coaching for people already training|You’re training\.<br>|content="Already training|content="For people already training/.test(startJs + readFileSync("client/public/start/index.html", "utf8")));
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
