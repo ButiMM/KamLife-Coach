@@ -68,5 +68,9 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
 check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
 check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "LOOKING", src: "TT" })?.step === "channel");
 
+// Since 14 Nov people not training yet can reach the coach, so the page and its share preview must not say it's only for people already training.
+check("the landing page and share preview welcome people who are just starting",
+  !/coaching for people already training|You’re training\.<br>|content="Already training|content="For people already training/.test(startJs + readFileSync("client/public/start/index.html", "utf8")));
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
