@@ -50,5 +50,23 @@ const sum = summarizeFunnel([
 check("page watch counts today's visits and WhatsApp clicks", sum.todaySoFar.visits === 100 && sum.todaySoFar.whatsappClicks === 8 && sum.yesterday.visits === 40);
 check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from === "q1" && sum.todaySoFar.biggestDrop?.to === "q2");
 
+
+// No dead ends: every screen except health and under-18 offers a way to stay in touch, across all 21,600 answer combinations.
+{
+  const cut = startJs.indexOf("// No health- or age-derived result");
+  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {QUESTIONS,routeAnswers,renderOutcome,SPOTS_OPEN};")({ hash: "", origin: "https://www.kamlife.co.za" });
+  let combos: Record<string, string>[] = [{}];
+  for (const q of page.QUESTIONS) combos = combos.flatMap((c: any) => q.options.map((o: string[]) => ({ ...c, [q.key]: o[0] })));
+  const stranded = combos.filter(a => {
+    const r = page.routeAnswers(a, page.SPOTS_OPEN);
+    if (r.outcome === "MEDICAL" || r.outcome === "GUARDIAN") return false;
+    const html = page.renderOutcome(r, a, "Lerato");
+    return !html.includes('id="whatsappLink"') && !html.includes('id="followChannel"');
+  });
+  check(`every non-health result has a WhatsApp or Channel button (${combos.length} combinations)`, combos.length === 21600 && stranded.length === 0);
+}
+check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
+check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "LOOKING", src: "TT" })?.step === "channel");
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);

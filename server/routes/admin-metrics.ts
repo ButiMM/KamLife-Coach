@@ -203,8 +203,9 @@ export function templateOf(text: string): string | null {
  * fit, and which bio they came from. The page sends {step, outcome, src} with sendBeacon (text/plain).
  * Only whitelisted values are counted, so nothing a visitor typed or answered can be stored.
  */
-const STEPS = new Set(["landing", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "name", "outcome", "contact"]);
-const OUTCOMES = new Set(["", "FIT_OPEN", "FIT_FULL", "OTHER"]);
+const STEPS = new Set(["landing", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "name", "outcome", "contact", "channel"]);
+// Non-fit reasons the page may send. Health and age results never leave the page: they arrive as OTHER.
+const OUTCOMES = new Set(["", "FIT_OPEN", "FIT_FULL", "BUDGET", "LOOKING", "NOT_READY", "OTHER"]);
 const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB", "LINK"]);
 
 export function parseFunnelEvent(raw: unknown): { step: string; outcome: string; src: string } | null {
@@ -259,7 +260,7 @@ export function summarizeFunnel(rows: FunnelRow[], today: string) {
       if (a >= 5) { const lost = Math.round(((a - b) / a) * 100); if (!biggestDrop || lost > biggestDrop.lostPct) biggestDrop = { from: ORDER[i], to: ORDER[i + 1], lostPct: lost }; }
     }
     const fits = (outcomes.FIT_OPEN ?? 0) + (outcomes.FIT_FULL ?? 0);
-    return { visits: v("landing"), started: v("q1"), finished: v("outcome"), whatsappClicks: v("contact"),
+    return { visits: v("landing"), started: v("q1"), finished: v("outcome"), whatsappClicks: v("contact"), channelClicks: v("channel"),
       startRatePct: pct(v("q1"), v("landing")), finishRatePct: pct(v("outcome"), v("q1")),
       fitRatePct: pct(fits, v("outcome")), visitToWhatsappPct: pct(v("contact"), v("landing")),
       outcomes, bySource, steps, biggestDrop };
