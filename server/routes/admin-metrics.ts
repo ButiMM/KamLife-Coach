@@ -205,7 +205,7 @@ export function templateOf(text: string): string | null {
  */
 const STEPS = new Set(["landing", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "name", "outcome", "contact", "channel"]);
 // Non-fit reasons the page may send. Health and age results never leave the page: they arrive as OTHER.
-const OUTCOMES = new Set(["", "FIT_OPEN", "FIT_FULL", "BUDGET", "LOOKING", "NOT_READY", "OTHER"]);
+const OUTCOMES = new Set(["", "FIT_OPEN", "FIT_FULL", "BUDGET", "NOT_READY", "OTHER"]);
 const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB", "LINK"]);
 
 export function parseFunnelEvent(raw: unknown): { step: string; outcome: string; src: string } | null {

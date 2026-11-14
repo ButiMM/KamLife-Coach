@@ -66,7 +66,15 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
   check(`every non-health result has a WhatsApp or Channel button (${combos.length} combinations)`, combos.length === 21600 && stranded.length === 0);
 }
 check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
-check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "LOOKING", src: "TT" })?.step === "channel");
+check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "BUDGET", src: "TT" })?.step === "channel");
+{
+  const cut = startJs.indexOf("// No health- or age-derived result");
+  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {routeAnswers,messageFor};")({ hash: "", origin: "https://www.kamlife.co.za" });
+  const explorer = { goal: "weight", train: "home", need: "food", commit: "ready", start: "looking", med: "none", price: "yes" };
+  const r = page.routeAnswers(explorer, true);
+  check("someone just exploring, otherwise a fit, reaches the coach and says they're exploring",
+    r.outcome === "FIT_OPEN" && page.messageFor(explorer, "Lerato", r).includes("Start: I'm just exploring for now"));
+}
 
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
