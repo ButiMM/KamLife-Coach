@@ -68,5 +68,22 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
 check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
 check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "LOOKING", src: "TT" })?.step === "channel");
 
+
+// The start page promises video demos for gym and home: every exercise on the plan page has one.
+{
+  const w: any = {};
+  new Function("window", readFileSync("client/public/plan/programmes.js", "utf8"))(w);
+  const noVideo: string[] = [];
+  for (const [key, text] of Object.entries(w.KAMLIFE_PROGRAMMES as Record<string, string>)) {
+    const lines = text.split("\n");
+    lines.forEach((l, i) => {
+      if (!/^\d️⃣/u.test(l)) return;
+      const next = lines.slice(i + 1, i + 3).find(x => /^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/.test(x.trim()));
+      if (!next) noVideo.push(`${key}: ${l}`);
+    });
+  }
+  check(`every plan page exercise has a video${noVideo.length ? ` (missing: ${noVideo.slice(0, 3).join("; ")})` : ""}`, noVideo.length === 0);
+}
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
