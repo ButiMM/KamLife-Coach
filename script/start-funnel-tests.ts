@@ -97,5 +97,15 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
 check("the landing page and share preview welcome people who are just starting",
   !/coaching for people already training|You’re training\.<br>|content="Already training|content="For people already training/.test(startJs + readFileSync("client/public/start/index.html", "utf8")));
 
+// Safety: a change to the pay page's bank account name, or a new phone number on the pay or start page, must fail CI before it ships.
+{
+  const payJs = readFileSync("client/public/pay/app.js", "utf8");
+  check("the pay page account name is KamLife (Pty) Ltd", /const ACCOUNT_NAME = "KamLife \(Pty\) Ltd";/.test(payJs));
+  const pages = startJs + payJs + payHtml + readFileSync("client/public/start/index.html", "utf8");
+  const numbers = pages.match(/(?:\+?27|0)[\s-]?\d{2}[\s-]?\d{3}[\s-]?\d{4}/g) ?? [];
+  const other = numbers.filter(n => n.replace(/\D/g, "").replace(/^0/, "27") !== "27658829664");
+  check(`the only phone number on the pay and start pages is 065 882 9664${other.length ? ` (found: ${other.join(", ")})` : ""}`, numbers.length > 0 && other.length === 0);
+}
+
 console.log(failed ? `\n${failed} failed` : "\nstart-funnel-tests: all passed");
 process.exit(failed ? 1 : 0);
