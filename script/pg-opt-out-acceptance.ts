@@ -166,6 +166,7 @@ const PHRASES = [
   "Ke kopa o se ke wa nthomella melaetsa hape.",            // Sesotho
   "Moenie vir my boodskappe stuur nie, asseblief.",         // Afrikaans
   "Ndicela ungandithumeleli imiyalezo yenu",                // isiXhosa "your messages": every message, not a topic (#723 review)
+  "Please stop sending me messages on WhatsApp",            // #733: WhatsApp is the channel, not a topic
 ];
 const OPTED: Array<{ id: string; phone: string }> = [];
 for (const text of PHRASES) {
@@ -251,7 +252,7 @@ REAL("\n4. CONTROLS — what an opt-out is not, and what it does not stop");
   chk(/paused_until:/.test(notes) && !/opted_out:/.test(notes), "a timed holiday pause is still a pause, not an opt-out", `profile_notes=${notes}`);
   // A TOPIC IS NOT THE CHANNEL (Codex @ 7716559) — main never opted these out, and neither may this.
   for (const text of ["I don't want your messages about calories, just send my workouts", "Stop messaging me about my weight",
-    "Please stop contacting me about calories", "Stop WhatsApping me about my weight"]) {
+    "Please stop contacting me about calories", "Stop WhatsApping me about my weight", "Stop sending me messages on weekends"]) {
     const T = await client("Topic Refusal");
     await say(T, text);
     const tn = (await pool.query("SELECT profile_notes n FROM users WHERE id = $1", [T.id])).rows[0].n || "";
