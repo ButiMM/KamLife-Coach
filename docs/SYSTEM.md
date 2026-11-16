@@ -69,8 +69,8 @@ The full list of names and code defaults is in the outgoing CTO's handover (22-2
 
 ## Reviewers
 
-Grok reviews on a fixed rhythm (`docs/GROK.md`): daily at ~07:00, and on every `switch` PR. Codex is out of capacity this week.
+Grok reviews on a fixed rhythm (`kamlife-strategy/docs/GROK.md (private repo)`): daily at ~07:00, and on every `switch` PR. Codex is out of capacity this week.
 
 ## Where the plan lives
 
-`docs/ORDERS.md` (the plan), `docs/QUEUE.md` (the order of work), `docs/FINDINGS.md` (every review finding, mapped to an issue), `docs/RISKS.md` (risk register), issue #280 (live status).
+`docs/ORDERS.md` (the plan), `docs/QUEUE.md` (the order of work), `kamlife-strategy/docs/FINDINGS.md (private repo)` (every review finding, mapped to an issue), `kamlife-strategy/docs/RISKS.md (private repo)` (risk register), issue #280 (live status).

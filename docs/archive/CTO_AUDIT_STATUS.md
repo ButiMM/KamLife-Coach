@@ -157,6 +157,6 @@ Triggered by an external CTO review flagging a stale R149 price fallback (#31 fo
   if any shipping file (client/src, server, shared) reintroduces a numeric price fallback or a hardcoded
   `R149`/`R99` string. Canonical `shared/pricing.ts` is exempt. Verified the guard fails on a known-bad
   pattern (not a no-op), then passes clean (184 files).
-- NOTE (not code, deliberately not auto-changed): `docs/financial-viability-analysis.md` and
+- NOTE (not code, deliberately not auto-changed): `kamlife-strategy/docs/financial-viability-analysis.md (private repo)` and
   `docs/stabilization-summary.md` still model R149 in margin/LTV tables. Swapping the number alone would
   make their arithmetic internally inconsistent — these need a deliberate finance recompute, not a sweep.

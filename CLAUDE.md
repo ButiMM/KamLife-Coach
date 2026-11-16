@@ -24,7 +24,7 @@ A write is claimed only when it happened (the turn's mutation record). A delete 
 ## Stack and env
 TypeScript, Node and Express on Railway; PostgreSQL with Drizzle (migrations run on start). WhatsApp via Twilio (`\n\n---\n\n` splits a reply into separate messages).
 Railway vars: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`, `TWILIO_SMS_NUMBER`, `MEDIA_BASE_URL`, `PAYFAST_MERCHANT_ID`, `APP_URL`, `PROACTIVE_PAUSED` (must not be `true`), `CORE_FRONT`, `CORE_WAVE2` / `CORE_WAVE4` (must not be `off`), `GLOBAL_AI_DAILY_HARD_CAP_USD`. The founder checks the live build by sending `version`. More in `docs/SYSTEM.md`, and check there before asking the founder anything.
-Costs: `docs/COSTS.md` (no new paid spend until revenue).
+Costs: `kamlife-strategy/docs/COSTS.md (private repo)` (no new paid spend until revenue).
 
 ## Never change without full understanding
 - `server/coach-prompt.ts`: the goal-aware food philosophy and coaching voice.

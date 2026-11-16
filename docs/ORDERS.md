@@ -19,7 +19,7 @@ This section outranks the rest of this file. It exists because a broad product w
 3. **Finish before you start.** Existing code for the same job is either listed in `docs/COMPONENTS.md` or found by searching the repo. While it is unfinished, nobody starts a new foundation: no new module under `server/core/`, store, table, prompt pipeline or scheduler. A PR states what it reuses or finishes in a `Reuses:` line. A new foundation needs the CTO's written reason why the existing one cannot be finished, on the PR.
 4. **Every PR names its row:** `Coverage row: A1` (several are fine; docs and ops PRs use a D row). The watch flags a PR without one.
 5. **Reviews and attacks feed the map; they never start a new plan.** Every finding maps to a row. A finding that would need a new foundation names the existing one it replaces and why that one can't be finished. Otherwise it is a task on that row.
-6. **Width check, weekly.** The sweep (`docs/CTO-SWEEP.md` §0) reports:
+6. **Width check, weekly.** The sweep (`kamlife-strategy/docs/CTO-SWEEP.md (private repo)` §0) reports:
    - which rows moved toward complete;
    - which rows still have zero gate cases;
    - which foundations are started but unwired.
@@ -164,11 +164,11 @@ If, after the gate baseline and shadow core are running, the shadow core does no
 | Attacks and code reviews | **Codex** | PR comments (`AGENTS.md`) |
 | Administration: Twilio/Meta templates and verification, WhatsApp billing, payments setup, POPIA paperwork | **Codex, with the founder** | issues labelled `admin` |
 | Marketing, market research, positioning | **A separate room** (not the CTO chat) | its own chat; decisions recorded in `docs/SYSTEM.md` |
-| Daily independent review | **Grok** | `docs/GROK.md` |
+| Daily independent review | **Grok** | `kamlife-strategy/docs/GROK.md (private repo)` |
 **Shared memory for every room:** `docs/SYSTEM.md` (what exists and what's decided). Nobody asks the founder something that's recorded there.
 
 
-**Grok (independent reviewer, fixed rhythm):** a daily product review at ~07:00, plus a switch review whenever a `switch` PR opens. Prompts and rhythm are in `docs/GROK.md`. The CTO triages every review into the three piles and files the gaps onto `COVERAGE.md` rows.
+**Grok (independent reviewer, fixed rhythm):** a daily product review at ~07:00, plus a switch review whenever a `switch` PR opens. Prompts and rhythm are in `kamlife-strategy/docs/GROK.md (private repo)`. The CTO triages every review into the three piles and files the gaps onto `COVERAGE.md` rows.
 
 **Lean verification (founder decision, 25 Sep): the builder's capacity comes first.**
 - **Every PR:** tests, the mouth ratchet, and, on `ready`/`switch`/`gate` PRs, the live replay gate. The gate's judge is an OpenAI model grading real tester journeys, which makes it independent of the Claude builder. It is the main check.

@@ -120,7 +120,7 @@ principles:
   question, no manual split. One product, each person gets the density they can
   handle. (This same adaptive pattern is being extended to tone and other axes.)
 
-_See `docs/delivery-decision.md` for the full rationale and `docs/retention-playbook.md`._
+_See `kamlife-strategy/docs/delivery-decision.md (private repo)` for the full rationale and `kamlife-strategy/docs/retention-playbook.md (private repo)`._
 
 ---
 

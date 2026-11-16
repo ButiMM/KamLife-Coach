@@ -47,7 +47,7 @@ PR-only attacks let a bad product pass PR by PR. This was proven on 7 Oct: 34 or
 5. **One comment per PR head, short.** No essays on unchanged behaviour.
 
 ## Codex standing orders (read first, every session)
-**Costs:** follow `docs/COSTS.md` → STANDING COST RULES. Never trigger the live gate or call paid models while attacking.
+**Costs:** follow `kamlife-strategy/docs/COSTS.md (private repo)` → STANDING COST RULES. Never trigger the live gate or call paid models while attacking.
 
 Before asking the founder anything, check `docs/SYSTEM.md` and the repo. Asking him for something already recorded or findable is a failure.
 
@@ -69,7 +69,7 @@ You attack; you do not build. `docs/ORDERS.md` §6 defines the role.
 
 ## Codex daily sweep
 
-Once a day, before attacking, answer the judgment questions in `docs/CTO-SWEEP.md` (§0 first, then especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
+Once a day, before attacking, answer the judgment questions in `kamlife-strategy/docs/CTO-SWEEP.md (private repo)` (§0 first, then especially 4, 5 and 14) in one issue labelled `cto-sweep`. Open an issue for every untracked gap. Keep it short.
 
 ## Git workflow (applies to every builder)
 
