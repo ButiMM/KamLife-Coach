@@ -1,0 +1,29 @@
+name: page-watch
+# Loads the live start, pay and plan pages and the visit counter about 30 minutes before each
+# run of the founder's scheduled page watch (08:13, 12:13, 16:13, 20:13 SAST), which reads the
+# "PAGEWATCH" line from this run's log. The scheduled watch cannot open web pages itself.
+on:
+  schedule:
+    - cron: "41 5,9,13,17 * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: page-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: script/page-watch.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node script/page-watch.mjs --self-test
+      - run: node script/page-watch.mjs
+        env:
+          FUNNEL_WATCH_KEY: ${{ secrets.FUNNEL_WATCH_KEY }}

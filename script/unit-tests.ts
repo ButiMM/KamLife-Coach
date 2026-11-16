@@ -4477,7 +4477,10 @@ test("'2 days ago' lands exactly two SAST days back at noon", () => {
 });
 
 test("day-name meal lands on a past SAST day with the right wall-clock slot", () => {
-  const d = parseMealDate("had chicken and rice on saturday evening");
+  // Name the SAST weekday two days back, so the test can't fall on today (it hardcoded "saturday" and failed every Saturday).
+  const twoDaysAgo = new Date(sastDayStart().getTime() - 2 * 86_400_000 + 12 * 3_600_000);
+  const dayName = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][new Date(twoDaysAgo.getTime() + 2 * 3_600_000).getUTCDay()];
+  const d = parseMealDate(`had chicken and rice on ${dayName} evening`);
   const diffFromToday = (sastDayStart().getTime() - sastDayStart(d).getTime()) / 86_400_000;
   assert.ok(diffFromToday >= 1 && diffFromToday <= 7, `days back: ${diffFromToday}`);
   const sastHour = new Date(d.getTime() + 2 * 3_600_000).getUTCHours();
