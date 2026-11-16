@@ -29,6 +29,16 @@ check("the pay page carries the same brand line as the start page", payHtml.incl
 const { isKamlifeDomain } = await import("../server/static");
 check("www.kamlife.co.za and kamlife.co.za go to /start", isKamlifeDomain("www.kamlife.co.za") && isKamlifeDomain("KamLife.co.za:443"));
 check("the Railway address keeps its own root", !isKamlifeDomain("kamlife-coach-production.up.railway.app") && !isKamlifeDomain(undefined));
+{
+  // The root serves the page itself (no redirect), so the address and share links stay kamlife.co.za.
+  const { kamlifeDomainRoot } = await import("../server/static");
+  const req: any = { method: "GET", path: "/", url: "/", headers: { host: "www.kamlife.co.za" } };
+  let redirected = false, nexted = false;
+  kamlifeDomainRoot(req, { redirect: () => { redirected = true; } } as any, () => { nexted = true; });
+  const startHtml = readFileSync("client/public/start/index.html", "utf8");
+  check("kamlife.co.za/ serves the start page with no redirect", !redirected && nexted && req.url === "/start/index.html");
+  check("share previews and canonical point at kamlife.co.za", startHtml.includes('rel="canonical" href="https://www.kamlife.co.za/"') && !startHtml.includes("up.railway.app") && startHtml.includes('src="/start/app.js"'));
+}
 
 check("no page says 'first 100 clients' or 'founding rate'", !/first 100 clients|founding rate/i.test(startJs + payHtml));
 // The page watch summary is counts only and finds where people drop off.
