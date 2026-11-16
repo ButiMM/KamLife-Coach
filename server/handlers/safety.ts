@@ -144,6 +144,15 @@ function asksToOptOut(m: string): boolean {
 }
 /** "Please stop messaging me for 2 weeks, I'm on holiday": a timed pause. The lifecycle pause owner sets it, so the
  *  front door must not take it (the coach has no pause action: the client kept getting messages). */
+/** The heart hold's ask (#706, #731). Training is held where it is served (the workout owners), so every
+ *  phrasing and language is held at once; food, steps and everything else still go through. */
+export function heartHoldMessage(user: any, name: string): string {
+  const conditions = String(user?.medicalConditions || "").split(",").map((s: string) => s.trim());
+  // The hold is set at onboarding for a heart condition, or by the acute floor after chest symptoms (#706).
+  const why = conditions.includes("heart_condition") ? "your profile shows a heart condition" : "you told me about chest symptoms";
+  const ask = `${name || "there"}, ${why}. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
+  return ask;
+}
 export function asksForTimedPause(m: string): boolean { return saysStopMessaging(m) && namesALength(m) && !namesATopic(m); }
 
 /** Record the opt-out and say so. NEVER CONFIRM WHAT DID NOT PERSIST (Codex @ 0c6dbe5). */
