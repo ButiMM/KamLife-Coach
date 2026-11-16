@@ -376,6 +376,11 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
       return (await handleSickFlow({ message: "I'm back", m: "i'm back", user, capName: name })) || "Welcome back. 💪";
     }
     case "SHOW_WORKOUT": {
+      // A held heart client gets the clearance ask, never a session, however the turn was phrased (#731).
+      if (user?.doctorClearanceRequired) {
+        const { heartHoldMessage } = await import("../handlers/safety");
+        return heartHoldMessage(user, (user?.name || "").split(" ")[0]);
+      }
       const { handleEarlyCommands } = await import("../handlers/early-commands");
       return (await handleEarlyCommands({ phone, message: "workout", m: "workout", user, hasMedia: false })) || "";
     }

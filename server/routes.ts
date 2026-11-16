@@ -24,7 +24,7 @@ import { getStepStreak, getStepResponse as _getStepResponse, logStepsForUser } f
 import { captureFriction } from "./friction";
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
-import { runSafetyGuards } from "./handlers/safety";
+import { runSafetyGuards, heartHoldMessage } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
 import { bumpNumericFluency, bumpVoiceNoteUse } from "./handlers/preferences";
 import { handleOnboardingBodyPhotos } from "./onboarding-physique";
@@ -355,22 +355,16 @@ async function routeMessage(phone: string, message: string, mediaUrl?: string, m
   const confirmsClearance = (/(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i).test(m)
     && !(/\b(?:not|never)\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|n'?t\s+(?:\w+\s+){0,2}?(?:cleared|clearance)|\bcleared\s+(?:me\s+)?yet\b/i).test(m);
   if (user.doctorClearanceRequired && !confirmsClearance) {
-    const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
-    {
-      const name = getDisplayName(user) || "there";
-      // The hold is set at onboarding for a heart condition, or by the acute floor after chest symptoms (#706).
-      const why = conditions.includes("heart_condition") ? "your profile shows a heart condition" : "you told me about chest symptoms";
-      const clearanceMsg = `${name}, ${why}. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
-      // Allow food/step/weight questions and crisis through, unless the same message asks for training: "I walked 5k this
-      // morning, what's my workout today?" would reach the workout owner and get a session (#722).
-      // The ask must be FOR the session, not food around it: "2 eggs before today's workout", "what should I eat before
-      // training?" are food (#724 review).
-      const asksToTrain = (/\b(?:what'?s|what\s+is|show|send|give|start)\s+(?:me\s+)?(?:my\s+|the\s+|today'?s\s+|tomorrow'?s\s+|my\s+next\s+|the\s+next\s+)?(?:workout|session|programme|program|training)\b|(?<!\b(?:before|after|for|pre|post)\s+)\b(?:today'?s|tomorrow'?s)\s+(?:workout|session)\b(?![^.!?]{0,20}\b(?:food|eat|meal|log)\b)|(?<!\b(?:before|after)\s+(?:my\s+)?)\b(?:workout|session|training)\s+(?:today|tomorrow|for\s+today)\b/i).test(m);
-      const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m) && !asksToTrain;
-      if (!allowThrough) {
-        await logChat(user.id, message, clearanceMsg, "HEART_GATE");
-        return clearanceMsg;
-      }
+    // Training is held at its owners (SHOW_WORKOUT, the workout command), so any phrasing is held (#731, #722).
+    // Here only a message about training stops early; a meal or steps report goes through and is logged (#732).
+    // The ask must be FOR the session, not food around it: "what should I eat before training?" is food (#724 review).
+    const asksToTrain = (/\b(?:what'?s|what\s+is|show|send|give|start)\s+(?:me\s+)?(?:my\s+|the\s+|a\s+|today'?s\s+|tomorrow'?s\s+|my\s+next\s+|the\s+next\s+)?(?:workout|session|programme|program|training)\b|(?<!\b(?:before|after|for|pre|post)\s+)\b(?:today'?s|tomorrow'?s)\s+(?:workout|session)\b(?![^.!?]{0,20}\b(?:food|eat|meal|log)\b)|(?<!\b(?:before|after)\s+(?:my\s+)?)\b(?:workout|session|training)\s+(?:today|tomorrow|for\s+today)\b|\b(?:what|which)\s+(?:\w+\s+){0,3}?(?:train|exercises?)\b|\bcan\s+i\s+train\b/i).test(m);
+    // Through: anything not about training at all, or food/steps/etc. that doesn't ask for the session.
+    const allowThrough = /^(?![^]*\b(?:workouts?|sessions?|programme|program|training|train|exercises?|gym|reps|sets)\b)|\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m) && !asksToTrain;
+    if (!allowThrough) {
+      const clearanceMsg = heartHoldMessage(user, getDisplayName(user));
+      await logChat(user.id, message, clearanceMsg, "HEART_GATE");
+      return clearanceMsg;
     }
   }
   // Accept doctor clearance confirmation

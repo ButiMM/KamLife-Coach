@@ -358,6 +358,14 @@ for (const text of ["I'm on metformin. Can I take it slow and walk after supper?
   chk(/clearance/i.test(k) && !/warm-up|sets|reps/i.test(k), "…\"I walked 5k this morning, what's my workout today?\" is still held, and no session is sent", k.slice(0, 160));
   for (const food of ["Log my meal: 2 eggs before today's workout", "What should I eat before training?"]) { // #724 review: food around a session is food
     const f = await say(H, food); chk(!/clearance for exercise/i.test(f), `…"${food}" is food, not met with the clearance ask`, f.slice(0, 160)); }
+  // #731: a training ask that also names steps is held where the session is served, in any phrasing.
+  for (const ask of ["I walked 5k. Give me a workout", "walked 3000 steps, what exercises should I do today?", "Steps done 6000. What do I train today?"]) {
+    const t = await say(H, ask); chk(/clearance/i.test(t) && !/warm-up|sets|reps/i.test(t), `…"${ask}" is held, and no session is sent`, t.slice(0, 160)); }
+  // #732: a plain meal report on the hold is logged, not met with the clearance ask.
+  const mealsBefore = Number((await pool.query("SELECT count(*) n FROM meal_logs WHERE user_id = $1", [H.id])).rows[0].n);
+  const pap = await say(H, "had pap for lunch");
+  const mealsAfter = Number((await pool.query("SELECT count(*) n FROM meal_logs WHERE user_id = $1", [H.id])).rows[0].n);
+  chk(!/clearance for exercise/i.test(pap) && mealsAfter > mealsBefore, "…\"had pap for lunch\" is logged, not held", `${mealsBefore}→${mealsAfter} | ${pap.slice(0, 160)}`);
   const { readHeldConstraints } = await import("../server/held-constraints");
   chk((await readHeldConstraints(H.phone)).trainingDeclined === true, "…and the held-constraints reader (morning, evening, outbound) declines training");
   // #717 ATTACK @ 4bcac7e: a negated clearance is not the clearance.

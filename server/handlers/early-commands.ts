@@ -544,6 +544,11 @@ export async function handleEarlyCommands(ctx: {
   const wantsDifferentProgramme = /\b(new|change|different|rebuild|another|switch|swap|upgrade)\b[^.!?]{0,30}\b(programme|program|workout|training|plan)\b/i.test(m)
     || /\b(programme|program|workout|training|plan)\b[^.!?]{0,30}\b(new|change|different|rebuild|another)\b/i.test(m);
   if (!wantsDifferentProgramme && (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest || looksLikeWorkoutRequest(m))) {
+    // A held heart client gets the clearance ask, never a session (#731): the old handlers serve it when the coach declines.
+    if (user?.doctorClearanceRequired) {
+      const { heartHoldMessage } = await import("./safety");
+      return heartHoldMessage(user, (user?.name || "").split(" ")[0]);
+    }
     // Equipment named in the request itself ("home workout with two dumbbells", "workout
     // with no equipment") overrides the mode for THIS serving via the same temp mechanism
     // holiday mode uses — 2026-07-13 tester screenshot: this phrasing used to reach the
