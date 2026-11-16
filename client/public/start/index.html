@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1b33">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="description" content="Training but not seeing the change, or ready to start? Find out if KamLife's personal WhatsApp coaching is right for you. Real South African food. A few honest questions.">
 <title>KamLife · Coaching on WhatsApp</title>
 <meta property="og:type" content="website">
@@ -26,7 +26,7 @@
 <meta name="twitter:description" content="For people training or ready to start, who want their body to show it.">
 <meta name="twitter:image" content="https://www.kamlife.co.za/start/kamlife-preview.png">
 
-<link rel="preload" as="image" href="/start/hero.avif" type="image/avif" fetchpriority="high">
+<link rel="preload" as="image" href="/start/hero-poster.jpg" fetchpriority="high">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap">
@@ -56,6 +56,8 @@ body[data-screen=landing] .footer{max-width:1080px;padding:32px 22px 40px;font-s
 .lx-trust{display:flex;flex-wrap:wrap;gap:8px 18px;margin:26px 0 0;padding:0;font-size:12px;color:#dfe5f0;letter-spacing:.04em}
 .lx-trust span:before{content:"✓";color:var(--orange);margin-right:7px;font-weight:700}
 .lx-photo{margin:0;justify-self:center;width:100%;max-width:380px}
+.lx-photo video{display:block;width:100%;height:auto;aspect-ratio:9/16;object-fit:cover;background:#0f1b33;border-radius:22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.6)}
+.lx-proof{margin:0 auto 28px;max-width:320px}.lx-proof figcaption{color:var(--muted);font-size:14px}
 .lx-photo img{display:block;width:100%;height:auto;border-radius:22px;box-shadow:0 30px 70px -20px rgba(0,0,0,.6);outline:1px solid rgba(255,255,255,.12);outline-offset:-1px}
 .lx-photo figcaption{font-size:12px;color:#aeb9cf;margin-top:12px;text-align:center}
 .lx-sec{max-width:1080px;margin:0 auto;padding:64px 22px 0;width:100%}
@@ -98,7 +100,17 @@ body[data-screen=landing] .footer{max-width:1080px;padding:32px 22px 40px;font-s
 @media(min-width:860px){.lx-phases{grid-template-columns:repeat(3,1fr);gap:18px}}
 .lx-channelcard{border:1px solid #cfe9d8;background:#f1faf4;border-radius:22px;padding:30px 26px}.lx-channelcard h2{font-size:clamp(26px,5vw,36px)!important;margin:0 0 10px!important}.lx-channelcard p{color:var(--muted);font-size:15px;line-height:1.65;margin:0 0 20px}.lx-aside{color:#14783b;font-size:15px;font-weight:600;margin:0 0 8px}.lx-channel-btn{display:inline-flex;gap:10px;align-items:center;background:#fff;color:#14783b;border:1.5px solid #1fa855;border-radius:999px;padding:13px 22px;font-weight:600;font-size:15px;text-decoration:none}
 .door2{margin:28px 0 8px;padding:24px 22px;border:1.5px solid #1fa855;border-radius:20px;background:#f1faf4}.door2 h3{margin:0 0 8px;font-size:18px;color:var(--navy)}.door2 p{margin:0 0 16px;font-size:14px;line-height:1.65;color:var(--muted)}.door2-btn{display:inline-flex;align-items:center;gap:10px;background:#1fa855;color:#fff;border-radius:999px;padding:14px 22px;font-weight:600;font-size:15px;text-decoration:none}.door2-btn:hover{background:#1b9a4d}
-@media(prefers-reduced-motion:reduce){.lx-cta{transition:none}}
+.lx-hero-note,.lx-hero h1,.lx-lead,.lx-hero .lx-cta,.lx-price-note,.lx-trust{animation:lx-rise .5s cubic-bezier(.2,.7,.2,1) both}
+.lx-hero h1{animation-delay:.06s}.lx-lead{animation-delay:.12s}.lx-hero .lx-cta{animation-delay:.18s}.lx-price-note,.lx-trust{animation-delay:.24s}
+.lx-photo{animation:lx-photo .7s cubic-bezier(.2,.7,.2,1) .1s both}
+@keyframes lx-rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes lx-photo{from{opacity:0;transform:scale(.97)}}
+.lx-reveal .lx-sec>*{transition:opacity .5s cubic-bezier(.2,.7,.2,1),transform .5s cubic-bezier(.2,.7,.2,1)}
+.lx-reveal .lx-sec:not(.lx-in)>*{opacity:0;transform:translateY(18px)}
+.lx-reveal .lx-sec>*:nth-child(2){transition-delay:.06s}.lx-reveal .lx-sec>*:nth-child(3){transition-delay:.12s}.lx-reveal .lx-sec>*:nth-child(n+4){transition-delay:.18s}
+.lx-cta:active,.door2-btn:active,.lx-channel-btn:active,.answer:active,.primary:active,.whatsapp:active{transform:scale(.97);transition:transform .12s ease}
+.lx-faq details[open] p{animation:lx-rise .3s ease both}
+@media(prefers-reduced-motion:reduce){.lx-cta{transition:none}.lx-hero *,.lx-photo,.lx-faq p{animation:none!important}.lx-reveal .lx-sec>*{opacity:1!important;transform:none!important;transition:none!important}}
 </style>
 </head>
 <body>
