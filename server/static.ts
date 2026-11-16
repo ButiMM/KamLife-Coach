@@ -18,8 +18,8 @@ export function serveStatic(app: Express) {
   });
 }
 
-// kamlife.co.za is the manual-coaching brand. Its front door is the /start page,
-// not the Coach K app that the Railway root serves.
+// kamlife.co.za is the manual-coaching brand. Its root serves the /start page itself
+// (no redirect, so the address bar and share links stay kamlife.co.za), not the Coach K app.
 export function isKamlifeDomain(host: string | undefined): boolean {
   const h = (host ?? "").toLowerCase().split(":")[0];
   return h === "kamlife.co.za" || h === "www.kamlife.co.za";
@@ -27,7 +27,7 @@ export function isKamlifeDomain(host: string | undefined): boolean {
 
 export function kamlifeDomainRoot(req: Request, res: Response, next: NextFunction) {
   if ((req.method === "GET" || req.method === "HEAD") && req.path === "/" && isKamlifeDomain(req.headers.host)) {
-    return res.redirect(302, "/start/");
+    req.url = "/start/index.html";
   }
   next();
 }

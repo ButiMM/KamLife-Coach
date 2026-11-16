@@ -134,7 +134,7 @@ function saysStopMessaging(m: string): boolean {
 // …and in the SA languages, a messages word with its "about" (#721): "ungandithumeleli imiyalezo ye-calories", "melaetsa ka ga dijo",
 // "boodskappe oor kalorieë" ask to stop one kind of message, not every message. A possessive is not a topic: "imiyalezo yenu"
 // (your messages) is every message (#723 review), so "ye" needs its hyphen.
-const namesATopic = (m: string) => /\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|on|regarding)\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b|\b(?:i?imiyalezo|imilayezo|melaetsa|molaetsa|boodskappe)\s+(?:ye-|nge-?|yoku|ngoku(?=\w)|ka\s+ga\s+|ka\s+|oor\s+|mayelana\s+)\S/i.test(m);
+const namesATopic = (m: string) => /\b(?:messages?|messaging|texting|sending|contacting|whatsapp(?:ing)?|reminders?)\s+(?:me\s+)?(?:about|regarding|on(?!\s+(?:whatsapp|here|this\s+(?:number|chat|app)|my\s+(?:phone|number|whatsapp))\b))\b|\b(?:just|only)\s+(?:send|keep)\b|\bexcept\b|\bbut\s+(?:keep|still|send)\b|\b(?:i?imiyalezo|imilayezo|melaetsa|molaetsa|boodskappe)\s+(?:ye-|nge-?|yoku|ngoku(?=\w)|ka\s+ga\s+|ka\s+|oor\s+|mayelana\s+)\S/i.test(m);
 const namesALength = (m: string) => /\b\d+\s*(?:days?|weeks?|months?)\b|\bfor\s+(?:a|one|two|three|a\s+few)\s+(?:days?|weeks?|months?)\b|\buntil\b/i.test(m);
 function asksToOptOut(m: string): boolean {
   return saysStopMessaging(m) && !namesALength(m)
