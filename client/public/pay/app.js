@@ -8,7 +8,7 @@ const MONTHLY_PRICE = 250;
 const UPFRONT_PRICE = 700;
 const UPFRONT_MONTHS = 3;
 const COACH_PHONE = "27658829664";
-const PROOF_MESSAGE = "Hi Coach, here's my proof of payment 🧡";
+const PROOF_MESSAGE = "Hi Coach, I've just paid 🧡";
 ;
 "use strict";
 const BANK_ROWS = [["Bank",BANK],["Account name",ACCOUNT_NAME],["Account number",ACCOUNT_NUMBER],["Account type",ACCOUNT_TYPE],["Branch code",BRANCH_CODE]];
