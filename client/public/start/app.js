@@ -9,8 +9,12 @@ const REPLY_HOURS = "6am and 8pm";
 // Add only real client quotes with permission. No sample or placeholder quotes.
 // Each entry requires {firstName, quote, consent: true}; at most two are shown.
 const CLIENT_QUOTES = [
+  // Real WhatsApp messages from clients, used with their consent (founder approved 17 Nov). No first name: shown as "KamLife client".
+  {quote:"I wore my size 40 skirt to church yesterday. It was tight, it fits well now.",consent:true},
   {firstName:"Tshiamo",quote:"I feel like a superhero ever since I joined.",consent:true},
+  {quote:"I'm really seeing results and I'm happy with my program and progress.",consent:true},
   {firstName:"Puntsa",quote:"The abs are coming!",consent:true},
+  {quote:"I enjoy thata ya session ya Friday 🙈",consent:true},
 ];
 // Supply the real public Channel URL to enable the starter follow button. Never a chat number.
 const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/0029VbDsTWZJP20vhfLR6a0K";
@@ -92,9 +96,9 @@ function landingSectionsHtml(){
  +`<section class="lx-sec lx-faq" aria-labelledby="faqTitle"><h2 id="faqTitle" class="brand-serif">Good to know.</h2>${faqs.map(([q,ans])=>`<details><summary>${q}</summary><p>${ans}</p></details>`).join("")}</section>`;
 }
 function testimonialsHtml(quotes=CLIENT_QUOTES){
- const approved=Array.isArray(quotes)?quotes.filter(q=>q&&q.consent===true&&typeof q.firstName==="string"&&typeof q.quote==="string"&&firstName(q.firstName)&&q.quote.trim()).slice(0,2):[];
+ const approved=Array.isArray(quotes)?quotes.filter(q=>q&&q.consent===true&&typeof q.quote==="string"&&q.quote.trim()).slice(0,6):[];
  if(!approved.length)return '<section id="testimonials" class="testimonials" hidden aria-label="Client words"></section>';
- return `<section id="testimonials" class="testimonials lx-sec" aria-labelledby="testimonialsTitle"><h2 id="testimonialsTitle" class="brand-serif">In their words.</h2><div class="client-quotes">${approved.map(q=>`<figure class="client-quote"><blockquote>${escapeHtml(q.quote.trim())}</blockquote><figcaption>${escapeHtml(firstName(q.firstName))}</figcaption></figure>`).join("")}</div></section>`;
+ return `<section id="testimonials" class="testimonials lx-sec" aria-labelledby="testimonialsTitle"><h2 id="testimonialsTitle" class="brand-serif">Progress you can feel, before you see it.</h2><p class="lx-wins-sub">Straight from KamLife clients' WhatsApp messages.</p><div class="lx-chat" role="list">${approved.map(q=>`<div class="lx-bubble" role="listitem"><p>${escapeHtml(q.quote.trim())}</p><span>${q.firstName&&firstName(q.firstName)?escapeHtml(firstName(q.firstName)):"KamLife client"}</span></div>`).join("")}</div></section>`;
 }
 function fitRecapHtml(){
  return `<section class="fit-recap" aria-label="Your coaching at a glance"><p><strong>Your plan, your food, me on WhatsApp.</strong></p><p>R${PRICE}/month, month to month.</p><p>I reply personally between ${escapeHtml(REPLY_HOURS)}. South African time.</p></section>`;
