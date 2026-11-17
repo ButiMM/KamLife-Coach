@@ -4,10 +4,14 @@
  */
 process.env.KAMLIFE_DB_STUB = "1";
 process.env.OPENAI_API_KEY ??= "sk-stub";
-const { parseFunnelEvent } = await import("../server/routes/admin-metrics");
+const { parseFunnelEvent, spotsOpenFromEnv } = await import("../server/routes/admin-metrics");
 
 let failed = 0;
 function check(name: string, ok: boolean) { if (!ok) { failed++; console.log(`FAIL ${name}`); } else console.log(`ok   ${name}`); }
+
+// The founder closes the intake from Railway (KAMLIFE_SPOTS=full) without a code change; only "full" closes it.
+check("KAMLIFE_SPOTS=full closes the intake; unset, open or a typo keeps it open",
+  spotsOpenFromEnv("full") === false && spotsOpenFromEnv(" FULL ") === false && spotsOpenFromEnv(undefined) === true && spotsOpenFromEnv("open") === true && spotsOpenFromEnv("fulll") === true);
 
 check("the page's beacon (a JSON string) is counted",
   JSON.stringify(parseFunnelEvent('{"step":"landing","outcome":"","src":"TT"}')) === JSON.stringify({ step: "landing", outcome: "", src: "TT" }));
@@ -64,11 +68,11 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
 // No dead ends: every screen except health and under-18 offers a way to stay in touch, across every answer combination.
 {
   const cut = startJs.indexOf("// No health- or age-derived result");
-  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {QUESTIONS,routeAnswers,renderOutcome,SPOTS_OPEN};")({ hash: "", origin: "https://www.kamlife.co.za" });
+  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {QUESTIONS,routeAnswers,renderOutcome,spotsOpen};")({ hash: "", origin: "https://www.kamlife.co.za" });
   let combos: Record<string, string>[] = [{}];
   for (const q of page.QUESTIONS) combos = combos.flatMap((c: any) => q.options.map((o: string[]) => ({ ...c, [q.key]: o[0] })));
   const stranded = combos.filter(a => {
-    const r = page.routeAnswers(a, page.SPOTS_OPEN);
+    const r = page.routeAnswers(a, page.spotsOpen);
     if (r.outcome === "MEDICAL" || r.outcome === "GUARDIAN") return false;
     const html = page.renderOutcome(r, a);
     return !html.includes('id="whatsappLink"') && !html.includes('id="followChannel"');
