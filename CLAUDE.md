@@ -10,6 +10,7 @@ Make what testers experience right. Done means **a tester sees it**: the change 
 - **One test per fix**: the case that broke, failing without the fix. No revert harnesses, ratchet entries or budget essays for ordinary changes.
 - It's based on `main`, small, and one task. Never push to `main` (it deploys straight to Railway).
 - **Delete before adding.** If a change makes old code unreachable, delete that code in the same PR.
+- **Anything people look at** (a page, a video, a post, a design): load the `frontend-design` skill first, and `motion-best-practices` for any animation. The founder rejected the generic look: no cream-and-serif, no capital-letter labels, no card grids, no fade-in on every section.
 - `[harm]` and `switch` PRs are reviewed by the CTO. Answer a review with a comment starting `ANSWER`.
 - Keep these green: the safety and billing pg suites (`safety-routing`, `opt-out`, `cancel-menu`, `payments-cancel-truth`, `refund-guarantee`, `spend-cap`), unit tests, and `core-wave1-switch`.
 
