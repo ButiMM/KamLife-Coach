@@ -8,11 +8,16 @@
 const HOSTS = ["https://www.kamlife.co.za", "https://kamlife-coach-production.up.railway.app"];
 const ALLOWED_PHONES = new Set(["27658829664", "0658829664"]);
 const ACCOUNT = "kamlife (pty) ltd";
+// The whole destination of a payment, not just the name: a changed number with the right name is the real attack.
+const ACCOUNT_NO = "63222881525", BRANCH = "250655";
 const SOCIAL = ["IG", "TT", "STATUS", "CELEB"];
 
 export function checkPay(js) {
-  const m = js.match(/ACCOUNT_NAME\s*=\s*["'`]([^"'`]*)["'`]/);
-  return { accountName: m ? m[1] : null, ok: !!m && m[1].trim().toLowerCase() === ACCOUNT };
+  const val = (k) => (js.match(new RegExp(k + "\\s*=\\s*[\"'`]([^\"'`]*)[\"'`]")) || [])[1] ?? null;
+  const accountName = val("ACCOUNT_NAME"), number = val("ACCOUNT_NUMBER"), branch = val("BRANCH_CODE");
+  const nameOk = !!accountName && accountName.trim().toLowerCase() === ACCOUNT;
+  const numberOk = number?.replace(/\s/g, "") === ACCOUNT_NO && branch?.trim() === BRANCH;
+  return { accountName, ok: nameOk, numberOk };
 }
 
 export function findPhones(text) {
@@ -65,7 +70,9 @@ async function main() {
     const c = checkPay(pay.body), ph = findPhones(pay.body);
     out.payAccountNameOk = c.ok;
     out.payPhonesOk = ph.ok;
+    out.payAccountNumberOk = c.numberOk;
     if (!c.ok) out.alerts.push(`BANK_NAME_CHANGED "${c.accountName ?? "missing"}"`);
+    if (!c.numberOk) out.alerts.push("BANK_NUMBER_CHANGED");
     if (!ph.ok) out.alerts.push(`OTHER_PHONE pay ${ph.other.join(",")}`);
   } else out.alerts.push(`PAY_CODE_UNREADABLE (${pay.error})`);
 
@@ -91,6 +98,10 @@ if (process.argv[2] === "--self-test") {
   const assert = (await import("node:assert/strict")).default;
   assert.equal(checkPay('const ACCOUNT_NAME = "KamLife (Pty) Ltd";').ok, true);
   assert.equal(checkPay('const ACCOUNT_NAME = "K Mokoena";').ok, false);
+  const good = 'const ACCOUNT_NAME = "KamLife (Pty) Ltd";\nconst ACCOUNT_NUMBER = "63222881525";\nconst BRANCH_CODE = "250655";';
+  assert.equal(checkPay(good).numberOk, true);
+  assert.equal(checkPay(good.replace("63222881525", "62999999999")).numberOk, false, "right name, wrong number must alert");
+  assert.equal(checkPay(good.replace("250655", "198765")).numberOk, false, "right name, wrong branch must alert");
   assert.deepEqual(findPhones('wa.me/27658829664 call 065 882 9664').other, []);
   assert.deepEqual(findPhones('wa.me/27821234567').other, ["27821234567"]);
   assert.deepEqual(findPhones('ACCOUNT_NUMBER = "63222881525"').other, []);
