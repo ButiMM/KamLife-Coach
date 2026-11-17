@@ -61,7 +61,7 @@ check("page watch counts today's visits and WhatsApp clicks", sum.todaySoFar.vis
 check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from === "q1" && sum.todaySoFar.biggestDrop?.to === "q2");
 
 
-// No dead ends: every screen except health and under-18 offers a way to stay in touch, across all 21,600 answer combinations.
+// No dead ends: every screen except health and under-18 offers a way to stay in touch, across every answer combination.
 {
   const cut = startJs.indexOf("// No health- or age-derived result");
   const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {QUESTIONS,routeAnswers,renderOutcome,SPOTS_OPEN};")({ hash: "", origin: "https://www.kamlife.co.za" });
@@ -70,20 +70,39 @@ check("page watch names the biggest drop-off", sum.todaySoFar.biggestDrop?.from 
   const stranded = combos.filter(a => {
     const r = page.routeAnswers(a, page.SPOTS_OPEN);
     if (r.outcome === "MEDICAL" || r.outcome === "GUARDIAN") return false;
-    const html = page.renderOutcome(r, a, "Lerato");
+    const html = page.renderOutcome(r, a);
     return !html.includes('id="whatsappLink"') && !html.includes('id="followChannel"');
   });
-  check(`every non-health result has a WhatsApp or Channel button (${combos.length} combinations)`, combos.length === 21600 && stranded.length === 0);
+  check(`every non-health result has a WhatsApp or Channel button (${combos.length} combinations)`, combos.length === 10800 && stranded.length === 0);
 }
 check("a non-fit reason (budget) is counted", parseFunnelEvent({ step: "outcome", outcome: "BUDGET", src: "TT" })?.outcome === "BUDGET");
 check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "BUDGET", src: "TT" })?.step === "channel");
 {
   const cut = startJs.indexOf("// No health- or age-derived result");
-  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {routeAnswers,messageFor};")({ hash: "", origin: "https://www.kamlife.co.za" });
-  const explorer = { goal: "weight", train: "home", need: "food", commit: "ready", start: "looking", med: "none", price: "yes" };
+  const page = new Function("location", startJs.slice(0, cut).replace('"use strict";', "") + ";return {routeAnswers,messageFor,renderOutcome,QUESTIONS};")({ hash: "", origin: "https://www.kamlife.co.za" });
+  const explorer = { goal: "weight", train: "home", need: "food", commit: "ready", start: "looking", med: "none" };
   const r = page.routeAnswers(explorer, true);
   check("someone just exploring, otherwise a fit, reaches the coach and says they're exploring",
-    r.outcome === "FIT_OPEN" && page.messageFor(explorer, "Lerato", r).includes("Start: I'm just exploring for now"));
+    r.outcome === "FIT_OPEN" && page.messageFor(explorer, r).includes("Start: I'm just exploring for now"));
+  // Shorter flow (17 Nov): no price question and no name screen; every combination still gets a result,
+  // and a full intake keeps the buyer by sending her to the coach's priority list, not away.
+  const qs: any[] = page.QUESTIONS;
+  check("the price question and name screen are gone", !qs.some((q: any) => q.key === "price") && !/screen==="name"/.test(startJs));
+  let combos = 0, incomplete = 0, fullLost = 0;
+  const walk = (i: number, a: any) => {
+    if (i === qs.length) {
+      for (const open of [true, false]) {
+        combos++; const res = page.routeAnswers(a, open);
+        if (res.outcome === "INCOMPLETE") incomplete++;
+        if (res.outcome === "FIT_FULL" && !(page.renderOutcome(res, a).includes('id="whatsappLink"') && page.messageFor(a, res).includes("PRIORITY LIST"))) fullLost++;
+      }
+      return;
+    }
+    for (const [v] of qs[i].options) walk(i + 1, { ...a, [qs[i].key]: v });
+  };
+  walk(0, {});
+  check(`all ${combos} answer combinations reach a result`, combos > 0 && incomplete === 0);
+  check("a full intake always offers the priority list on WhatsApp", fullLost === 0);
 }
 
 
