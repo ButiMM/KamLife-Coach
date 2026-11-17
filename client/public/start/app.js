@@ -9,12 +9,15 @@ const REPLY_HOURS = "6am and 8pm";
 // Add only real client quotes with permission. No sample or placeholder quotes.
 // Each entry requires {firstName, quote, consent: true}; at most two are shown.
 const CLIENT_QUOTES = [
-  // Real WhatsApp messages from clients, used with their consent (founder approved 17 Nov). No first name: shown as "KamLife client".
-  {quote:"I wore my size 40 skirt to church yesterday. It was tight, it fits well now.",consent:true},
-  {firstName:"Tshiamo",quote:"I feel like a superhero ever since I joined.",consent:true},
-  {quote:"I'm really seeing results and I'm happy with my program and progress.",consent:true},
-  {firstName:"Puntsa",quote:"The abs are coming!",consent:true},
-  {quote:"I enjoy thata ya session ya Friday 🙈",consent:true},
+  // Real client wins, used with each client's yes (founder confirmed 17 Nov). `win` is the result in our words;
+  // `quote` is only ever her exact WhatsApp words; `said` says where a win without exact words came from.
+  // No first name: shown as "KamLife client".
+  {win:"Back in a dress she hadn't worn in two years.",said:"in a voice note",consent:true},
+  {win:"Wearing the smaller jeans she bought in September.",quote:"Beginning of Sept I purposely bought smaller size jeans and today I am wearing the jeans 💃🏾",consent:true},
+  {win:"Her size 40 skirt fits again.",quote:"I wore my size 40 skirt to church yesterday. It was tight, it fits well now.",consent:true},
+  {firstName:"Donda",win:"Never leaving KamLife. She calls it life changing.",said:"on WhatsApp",consent:true},
+  {firstName:"Puntsa",win:"Seeing her abs come through.",quote:"The abs are coming!",consent:true},
+  {firstName:"Tshiamo",win:"Feels like a superhero since she joined.",quote:"I feel like a superhero ever since I joined.",consent:true},
 ];
 // Supply the real public Channel URL to enable the starter follow button. Never a chat number.
 const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/0029VbDsTWZJP20vhfLR6a0K";
@@ -96,9 +99,11 @@ function landingSectionsHtml(){
  +`<section class="lx-sec lx-faq" aria-labelledby="faqTitle"><h2 id="faqTitle" class="brand-serif">Good to know.</h2>${faqs.map(([q,ans])=>`<details><summary>${q}</summary><p>${ans}</p></details>`).join("")}</section>`;
 }
 function testimonialsHtml(quotes=CLIENT_QUOTES){
- const approved=Array.isArray(quotes)?quotes.filter(q=>q&&q.consent===true&&typeof q.quote==="string"&&q.quote.trim()).slice(0,6):[];
- if(!approved.length)return '<section id="testimonials" class="testimonials" hidden aria-label="Client words"></section>';
- return `<section id="testimonials" class="testimonials lx-sec" aria-labelledby="testimonialsTitle"><h2 id="testimonialsTitle" class="brand-serif">Progress you can feel, before you see it.</h2><p class="lx-wins-sub">Straight from KamLife clients' WhatsApp messages.</p><div class="lx-chat" role="list">${approved.map(q=>`<div class="lx-bubble" role="listitem"><p>${escapeHtml(q.quote.trim())}</p><span>${q.firstName&&firstName(q.firstName)?escapeHtml(firstName(q.firstName)):"KamLife client"}</span></div>`).join("")}</div></section>`;
+ const ok=q=>q&&q.consent===true&&typeof q.win==="string"&&q.win.trim();
+ const approved=Array.isArray(quotes)?quotes.filter(ok).slice(0,6):[];
+ if(!approved.length)return '<section id="testimonials" class="testimonials" hidden aria-label="Client wins"></section>';
+ const who=q=>q.firstName&&firstName(q.firstName)?escapeHtml(firstName(q.firstName)):"KamLife client";
+ return `<section id="testimonials" class="testimonials lx-sec" aria-labelledby="testimonialsTitle"><h2 id="testimonialsTitle" class="brand-serif">Progress you can feel, before you see it.</h2><p class="lx-wins-sub">What KamLife clients told me this month.</p><ul class="lx-wins">${approved.map(q=>`<li class="lx-win"><p class="lx-win-h">${escapeHtml(q.win.trim())}</p>${typeof q.quote==="string"&&q.quote.trim()?`<blockquote class="lx-bubble"><p>${escapeHtml(q.quote.trim())}</p><span>${who(q)}</span></blockquote>`:`<p class="lx-win-who">${who(q)}, ${escapeHtml(q.said||"on WhatsApp")}</p>`}</li>`).join("")}</ul></section>`;
 }
 function fitRecapHtml(){
  return `<section class="fit-recap" aria-label="Your coaching at a glance"><p><strong>Your plan, your food, me on WhatsApp.</strong></p><p>R${PRICE}/month, month to month.</p><p>I reply personally between ${escapeHtml(REPLY_HOURS)}. South African time.</p></section>`;
