@@ -12,6 +12,11 @@ import { PRICING } from "../../shared/pricing";
 // North-star metrics (2026-07-14) — extracted from admin.ts for the file-size budget.
 // The money + engagement + quality layer the VC review asked for. Detailed funnel/
 // retention live at /api/dashboard/funnel; this is the CFO + habit + quality view.
+/** Anything but an explicit "full" keeps the intake open, so a typo never turns buyers away. */
+export function spotsOpenFromEnv(v: string | undefined): boolean {
+  return String(v ?? "").trim().toLowerCase() !== "full";
+}
+
 export function registerAdminMetrics(app: Express) {
   registerFunnelRoutes(app);
   // ── NORTH-STAR METRICS (2026-07-14, VC review: "measure everything, publish it
@@ -292,6 +297,11 @@ function registerFunnelRoutes(app: Express) {
       WHERE day >= (NOW() AT TIME ZONE 'Africa/Johannesburg')::date - ${days}::int
       ORDER BY day DESC, step, src`);
     res.json({ days, rows: r.rows ?? r });
+  });
+
+  // Manual-coaching intake: the founder flips KAMLIFE_SPOTS=full in Railway at 50 clients (no code change, no CI).
+  app.get("/api/spots", (_req, res) => {
+    res.set("Cache-Control", "no-store").json({ open: spotsOpenFromEnv(process.env.KAMLIFE_SPOTS) });
   });
 
   app.get("/api/funnel/watch", async (req, res) => {
