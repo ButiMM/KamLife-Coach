@@ -49,7 +49,7 @@ A commitment with no evidence path isn't proposed as a checkable one. Coach K ca
 ## 5. Follow-up timing (WhatsApp rules)
 
 - **Inside the 24-hour window:** free-form, once, at the client's usual active hour on the due day (from their last inbound times). If they write to us first that day, the follow-up is folded into our reply and no proactive message is sent.
-- **Outside the window:** only an approved template. Its Meta category (utility or marketing) is unknown until Meta approves it, and the category sets the cost (`docs/COSTS.md`). Until one is approved, there is **no follow-up outside 24 hours**. The commitment waits for the client's next message.
+- **Outside the window:** only an approved template. Its Meta category (utility or marketing) is unknown until Meta approves it, and the category sets the cost (`kamlife-strategy/docs/COSTS.md (private repo)`). Until one is approved, there is **no follow-up outside 24 hours**. The commitment waits for the client's next message.
 - **At most one follow-up per commitment,** inside the one-a-day proactive cap. It replaces that day's morning or evening touch; it never adds to it.
 - **Released automatically** after the due day plus 2 days with no evidence and no reply: the state becomes `released`, with no message.
 

@@ -137,7 +137,7 @@ Write the answer here when you have it: `_______________________`
 ## DAY 2–3 — company and compliance
 
 I cannot see any of this from the code, so **confirm each one yourself** rather than
-trusting the old checklist in `docs/SA_COMPLIANCE_CHECKLIST.md` — it says PayFast is
+trusting the old checklist in `kamlife-strategy/docs/SA_COMPLIANCE_CHECKLIST.md (private repo)` — it says PayFast is
 "not done" while your `selfcheck` says payments are live, so it is out of date
 somewhere.
 

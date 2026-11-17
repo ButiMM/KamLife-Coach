@@ -1,5 +1,5 @@
 /**
- * REAL-POSTGRESQL ACCEPTANCE — the AI spend cap fails SAFE (#340, docs/RISKS.md).
+ * REAL-POSTGRESQL ACCEPTANCE — the AI spend cap fails SAFE (#340, kamlife-strategy/docs/RISKS.md (private repo)).
  *
  * WHAT WAS BROKEN: `isUnderMonthlyCostCap` returned `true // fail open` when the spend query
  * errored, the per-client call count did the same, and the account-wide daily figure was only a

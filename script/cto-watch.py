@@ -179,7 +179,7 @@ if merged_now:
     alerts.append("**Auto-merged this run:** " + ", ".join(f"#{n}" for n in merged_now))
 
 merged = [p for p in api("GET", "/pulls?state=closed&sort=updated&direction=desc&per_page=30") if p.get("merged_at")]
-# Free daily sweep items (no AI): the checkable parts of docs/CTO-SWEEP.md.
+# Free daily sweep items (no AI): the checkable parts of kamlife-strategy/docs/CTO-SWEEP.md (private repo).
 try:
     open_prs_all = api("GET", "/pulls?state=open&per_page=100")
     pr_text = " ".join((x["title"] or "") + " " + (x["body"] or "") for x in open_prs_all)
