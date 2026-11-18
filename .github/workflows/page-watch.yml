@@ -1,10 +1,11 @@
 name: page-watch
-# Loads the live start, pay and plan pages and the visit counter about 30 minutes before each
+# Loads the live start, pay and plan pages and the visit counter every 30 minutes (GitHub skips many
+# scheduled runs, and the founder's watch cannot start this job itself, so it runs often) for each
 # run of the founder's scheduled page watch (08:13, 12:13, 16:13, 20:13 SAST), which reads the
 # "PAGEWATCH" line from this run's log. The scheduled watch cannot open web pages itself.
 on:
   schedule:
-    - cron: "41 5,9,13,17 * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 permissions:
   contents: read
