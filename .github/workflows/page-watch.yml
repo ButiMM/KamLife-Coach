@@ -6,6 +6,13 @@ name: page-watch
 on:
   schedule:
     - cron: "7,37 * * * *"
+  # GitHub runs this repo's schedules only a few times a day (cto-watch's 10-minute schedule ran 4 times on
+  # 17 Nov), so also run after every deploy and whenever the other jobs finish.
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [cto-watch, Database Backup, Tests]
+    types: [completed]
   workflow_dispatch: {}
 permissions:
   contents: read
