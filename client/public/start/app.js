@@ -26,7 +26,7 @@ const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/0029VbDsTWZJP20vhfLR6
 const OPEN_TO_STARTERS = true;
 // Optional founder-supplied image only. Leave blank until consented asset is available.
  // Founder-supplied image, restored at their request.
-const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB"]);
+const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB", "SHARE"]);
 const SRC = SOURCES.has(location.hash.slice(1).toUpperCase()) ? location.hash.slice(1).toUpperCase() : "LINK";
 const QUESTIONS = [
  {key:"goal",title:"What would you like to work towards?",sub:"Tell me what you want. I'll help you figure out the right approach.",options:[["weight","Lose weight"],["shape","Lose body fat and shape my body"],["muscle","Build muscle and get stronger"],["fitness","Get fitter and feel better"],["guidance","I'm not sure. I need guidance"]]},
@@ -108,7 +108,7 @@ function testimonialsHtml(quotes=CLIENT_QUOTES){
 }
 // The coach himself (founder photo, his consent). Words are his facts only: no qualification claims.
 function coachHtml(){
- return `<section class="lx-sec lx-coach" aria-labelledby="coachTitle"><img class="lx-coach-img" src="/start/coach.webp" width="900" height="1037" loading="lazy" decoding="async" alt="Koketso, the KamLife coach"><div class="lx-coach-text"><h2 id="coachTitle" class="brand-serif">I’m Koketso. I coach you myself.</h2><p>Every plan, every reply and every check on your meal photos comes from me. Not an app, not a team, not a bot.</p><p>That’s why I keep each intake small. You get a coach who actually knows your week, your food and your goal.</p><p class="lx-coach-sign">Koketso, KamLife, Johannesburg</p></div></section>`;
+ return `<section class="lx-sec lx-coach" aria-labelledby="coachTitle"><img class="lx-coach-img" src="/start/coach.webp" width="900" height="1037" loading="lazy" decoding="async" alt="Koketso, the KamLife coach"><div class="lx-coach-text"><h2 id="coachTitle" class="brand-serif">I’m Koketso. I&nbsp;keep it simple.</h2><p>I started KamLife because South Africa has a health problem, and the advice out there is loud and confusing. Almost everyone who joins me arrives confused.</p><p>What changed my body, and what works for my clients, is the basics done properly: walk every day, train four times a week, eat whole food, drink your water and sleep well. Nobody will ever tell you those are bad for you.</p><p>I keep you on them, around your real life and your real food. Every plan and every reply comes from me, not an app, not a team, not a bot. That’s why each intake stays small.</p><p class="lx-coach-sign">Koketso, KamLife, Johannesburg</p></div></section>`;
 }
 function fitRecapHtml(){
  return `<section class="fit-recap" aria-label="Your coaching at a glance"><p><strong>Your plan, your food, me on WhatsApp.</strong></p><p>R${PRICE}/month, month to month.</p><p>I reply personally between ${escapeHtml(REPLY_HOURS)}. South African time.</p></section>`;
