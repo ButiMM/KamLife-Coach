@@ -89,6 +89,13 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   const r = page.routeAnswers(explorer, true);
   check("someone just exploring, otherwise a fit, reaches the coach and says they're exploring",
     r.outcome === "FIT_OPEN" && page.messageFor(explorer, r).includes("Start: I'm just exploring for now"));
+  // GLP-1 users (19 Nov): someone on weight-loss medication from her doctor finds her answer, reaches the coach,
+  // and is told her doctor stays in charge of the medication.
+  const onMeds = { ...explorer, start: "now", med: "managed" };
+  const medOpt = page.QUESTIONS.find((q: any) => q.key === "med").options.find((o: any) => o[0] === "managed")[1];
+  const medR = page.routeAnswers(onMeds, true);
+  check("someone on weight-loss medication from her doctor reaches the coach with her doctor kept in charge",
+    /weight-loss medication/.test(medOpt) && medR.outcome === "FIT_OPEN" && page.renderOutcome(medR, onMeds).includes("Keep your doctor in the loop"));
   // Shorter flow (17 Nov): no price question and no name screen; every combination still gets a result,
   // and a full intake keeps the buyer by sending her to the coach's priority list, not away.
   const qs: any[] = page.QUESTIONS;
