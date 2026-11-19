@@ -30,15 +30,21 @@ export function findPhones(text) {
   return { other, ok: other.length === 0 };
 }
 
-export function traffic(json) {
-  const t = json?.todaySoFar;
+function day(t) {
   if (!t) return null;
   const bySource = {};
   for (const [src, v] of Object.entries(t.bySource ?? {})) bySource[src] = { visits: v.landing ?? 0, whatsapp: v.contact ?? 0 };
   const socialVisits = SOCIAL.reduce((s, k) => s + (bySource[k]?.visits ?? 0), 0);
   const whatsappClicks = t.whatsappClicks ?? 0;
-  return { day: json.today, visits: t.visits ?? 0, whatsappClicks, socialVisits, bySource,
-    realTraffic: whatsappClicks > 0 || socialVisits >= 20 };
+  // started = tapped the first question, finished = saw their result: shows where people stop, not just how many came.
+  return { visits: t.visits ?? 0, started: t.started ?? 0, finished: t.finished ?? 0, whatsappClicks, socialVisits, bySource,
+    outcomes: t.outcomes ?? {}, biggestDrop: t.biggestDrop ?? null, realTraffic: whatsappClicks > 0 || socialVisits >= 20 };
+}
+
+export function traffic(json) {
+  const t = day(json?.todaySoFar);
+  if (!t) return null;
+  return { day: json.today, ...t, yesterday: day(json.yesterday) };
 }
 
 async function get(path) {
@@ -108,6 +114,10 @@ if (process.argv[2] === "--self-test") {
   const t = traffic({ today: "2026-11-16", todaySoFar: { visits: 25, whatsappClicks: 0, bySource: { IG: { landing: 12, contact: 0 }, TT: { landing: 8, contact: 0 }, LINK: { landing: 5, contact: 0 } } } });
   assert.equal(t.socialVisits, 20);
   assert.equal(t.realTraffic, true);
+  const t2 = traffic({ today: "2026-11-19", todaySoFar: { visits: 15, started: 6, finished: 2, whatsappClicks: 0, outcomes: { FIT_OPEN: 2 }, biggestDrop: { from: "landing", to: "q1", lostPct: 60 }, bySource: { SHARE: { landing: 9, contact: 0 } } }, yesterday: { visits: 11, started: 3, finished: 1, whatsappClicks: 0, bySource: {} } });
+  assert.equal(t2.started, 6, "the report must say how many started the questions");
+  assert.equal(t2.biggestDrop.from, "landing");
+  assert.equal(t2.yesterday.visits, 11, "the morning report needs yesterday's full day");
   console.log("page-watch self-test ok");
 } else {
   await main();
