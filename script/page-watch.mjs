@@ -10,7 +10,7 @@ const ALLOWED_PHONES = new Set(["27658829664", "0658829664"]);
 const ACCOUNT = "kamlife (pty) ltd";
 // The whole destination of a payment, not just the name: a changed number with the right name is the real attack.
 const ACCOUNT_NO = "63222881525", BRANCH = "250655";
-const SOCIAL = ["IG", "TT", "STATUS", "CELEB"];
+const SOCIAL = ["IG", "TT", "STATUS", "CELEB", "SHARE"];
 
 export function checkPay(js) {
   const val = (k) => (js.match(new RegExp(k + "\\s*=\\s*[\"'`]([^\"'`]*)[\"'`]")) || [])[1] ?? null;

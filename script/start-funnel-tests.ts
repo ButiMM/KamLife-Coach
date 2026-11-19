@@ -19,6 +19,7 @@ check("a fit outcome is counted", parseFunnelEvent({ step: "outcome", outcome: "
 check("a health-derived outcome is never stored", parseFunnelEvent({ step: "outcome", outcome: "MEDICAL", src: "IG" }) === null);
 check("an unknown step is dropped", parseFunnelEvent({ step: "Lerato 0821234567", outcome: "", src: "IG" }) === null);
 check("an unknown source is dropped", parseFunnelEvent({ step: "landing", outcome: "", src: "someone's name" }) === null);
+check("a shared-link visit (#share) is counted", parseFunnelEvent({ step: "landing", outcome: "", src: "SHARE" })?.src === "SHARE");
 check("junk is dropped", parseFunnelEvent("not json") === null && parseFunnelEvent(null) === null);
 check("an oversized body is dropped", parseFunnelEvent(JSON.stringify({ step: "landing", pad: "x".repeat(400) })) === null);
 

@@ -26,7 +26,7 @@ const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/0029VbDsTWZJP20vhfLR6
 const OPEN_TO_STARTERS = true;
 // Optional founder-supplied image only. Leave blank until consented asset is available.
  // Founder-supplied image, restored at their request.
-const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB"]);
+const SOURCES = new Set(["IG", "TT", "STATUS", "CELEB", "SHARE"]);
 const SRC = SOURCES.has(location.hash.slice(1).toUpperCase()) ? location.hash.slice(1).toUpperCase() : "LINK";
 const QUESTIONS = [
  {key:"goal",title:"What would you like to work towards?",sub:"Tell me what you want. I'll help you figure out the right approach.",options:[["weight","Lose weight"],["shape","Lose body fat and shape my body"],["muscle","Build muscle and get stronger"],["fitness","Get fitter and feel better"],["guidance","I'm not sure. I need guidance"]]},
@@ -108,7 +108,8 @@ function testimonialsHtml(quotes=CLIENT_QUOTES){
 }
 // The coach himself (founder photo, his consent). Words are his facts only: no qualification claims.
 function coachHtml(){
- return `<section class="lx-sec lx-coach" aria-labelledby="coachTitle"><img class="lx-coach-img" src="/start/coach.webp" width="900" height="1037" loading="lazy" decoding="async" alt="Koketso, the KamLife coach"><div class="lx-coach-text"><h2 id="coachTitle" class="brand-serif">I’m Koketso. I coach you myself.</h2><p>Every plan, every reply and every check on your meal photos comes from me. Not an app, not a team, not a bot.</p><p>That’s why I keep each intake small. You get a coach who actually knows your week, your food and your goal.</p><p class="lx-coach-sign">Koketso, KamLife, Johannesburg</p></div></section>`;
+ const basics=["Walk, every day.","Strength train, at the gym or at home.","Eat whole food, fruit included.","Drink your water.","Sleep properly."];
+ return `<section class="lx-sec lx-coach" aria-labelledby="coachTitle"><img class="lx-coach-img" src="/start/coach.webp" width="900" height="1037" loading="lazy" decoding="async" alt="Koketso, the KamLife coach"><div class="lx-coach-text"><h2 id="coachTitle" class="brand-serif">Why I started KamLife</h2><blockquote class="lx-why"><p>“South Africa is in a health crisis, and the advice out there makes it worse. It’s loud, it’s confusing, and everyone is selling something. Almost every woman who comes to me is confused about what actually works.</p><p>So I took it back to the basics. They changed my body, they changed my clients’ bodies, and nobody will ever tell you they’re bad for you.”</p></blockquote><ul class="lx-basics">${basics.map(b=>`<li>${b}</li>`).join("")}</ul><p>Simple isn’t easy on your own. That’s my job: I keep you on the basics around your real life and your real food, and every reply comes from me. That’s why each intake stays small.</p><p class="lx-coach-sign">Koketso, founder of KamLife</p></div></section>`;
 }
 function fitRecapHtml(){
  return `<section class="fit-recap" aria-label="Your coaching at a glance"><p><strong>Your plan, your food, me on WhatsApp.</strong></p><p>R${PRICE}/month, month to month.</p><p>I reply personally between ${escapeHtml(REPLY_HOURS)}. South African time.</p></section>`;
