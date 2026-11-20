@@ -28,6 +28,7 @@ const { readFileSync } = await import("node:fs");
 const startJs = readFileSync("client/public/start/app.js", "utf8");
 const payHtml = readFileSync("client/public/pay/index.html", "utf8");
 check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
+check("the hero asks the first question itself: tapping a goal counts as started and goes to question 2 (20 Nov: 26 of 27 visitors left before starting)", /data-goal=/.test(startJs) && /answers\.goal=b\.dataset\.goal;count\("q1"\);visit\(QUESTIONS\[1\]\.key\)/.test(startJs));
 check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
 
 // kamlife.co.za opens on the /start page, not the Coach K app.
