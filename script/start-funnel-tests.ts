@@ -98,9 +98,10 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   check("someone on weight-loss medication from her doctor reaches the coach with her doctor kept in charge",
     /weight-loss medication/.test(medOpt) && medR.outcome === "FIT_OPEN" && page.renderOutcome(medR, onMeds).includes("Keep your doctor in the loop"));
   // About you (20 Nov): the founder must know who is messaging (name, woman or man, age, where) without asking in WhatsApp.
-  const who = { ...explorer, start: "now", med: "none", name: "Lerato M", sex: "f", age: "25-34", place: "Accra" };
+  const who = { ...explorer, start: "now", med: "none", name: "Lerato M", sex: "f", age: "25-34", place: "Accra", days: "3-4" };
   check("the WhatsApp message opens with her name, woman or man, age and where she's based",
-    page.messageFor(who, page.routeAnswers(who, true)).startsWith("Hi Coach 👋🏾 I'm Lerato (woman, 25-34), based in Accra. I did the KamLife check."));
+    page.messageFor(who, page.routeAnswers(who, true)).startsWith("Hi Coach 👋🏾 I'm Lerato (woman, 25-34), based in Accra. I did the KamLife check.")
+    && /, 3-4 days a week/.test(page.messageFor(who, page.routeAnswers(who, true))) && /Price: seen it/.test(page.messageFor(who, page.routeAnswers(who, true))));
   // Shorter flow (17 Nov): no price question and no name screen; every combination still gets a result,
   // and a full intake keeps the buyer by sending her to the coach's priority list, not away.
   const qs: any[] = page.QUESTIONS;
