@@ -14,7 +14,7 @@ const CLIENT_QUOTES = [
   // No first name: shown as "KamLife client".
   {win:"Back in a dress she hadn't worn in two years.",said:"in a voice note",consent:true},
   {firstName:"Samukelisiwe",win:"Wearing the smaller jeans she bought in September.",quote:"Beginning of Sept I purposely bought smaller size jeans and today I am wearing the jeans 💃🏾",consent:true},
-  {win:"Her size 40 skirt fits again.",quote:"I wore my size 40 skirt to church yesterday. It was tight, it fits well now.",consent:true},
+  {signedAs:"Ms Ndlovu",win:"Her size 40 skirt fits again.",quote:"I wore my size 40 skirt to church yesterday. It was tight, it fits well now.",consent:true},
   {firstName:"Donda",win:"Never leaving KamLife. She calls it life changing.",said:"on WhatsApp",consent:true},
   {firstName:"Puntsa",win:"Seeing her abs come through.",quote:"The abs are coming!",consent:true},
   {firstName:"Tshiamo",win:"Feels like a superhero since she joined.",quote:"I feel like a superhero ever since I joined.",consent:true},
@@ -120,7 +120,8 @@ function testimonialsHtml(quotes=CLIENT_QUOTES){
  const ok=q=>q&&q.consent===true&&typeof q.win==="string"&&q.win.trim();
  const approved=Array.isArray(quotes)?quotes.filter(ok).slice(0,6):[];
  if(!approved.length)return '<section id="testimonials" class="testimonials" hidden aria-label="Client wins"></section>';
- const who=q=>q.firstName&&firstName(q.firstName)?escapeHtml(firstName(q.firstName)):"KamLife client";
+ // signedAs: how a client asked to be named in full (e.g. "Ms Ndlovu"); otherwise her first name, or "KamLife client".
+ const who=q=>typeof q.signedAs==="string"&&q.signedAs.trim()?escapeHtml(q.signedAs.trim().slice(0,40)):q.firstName&&firstName(q.firstName)?escapeHtml(firstName(q.firstName)):"KamLife client";
  return `<section id="testimonials" class="testimonials v-sec v-stone" aria-labelledby="testimonialsTitle"><div class="v-wrap"><h2 id="testimonialsTitle" class="v-h">Progress you can feel, before you see it.</h2><p>What KamLife clients told me this month.</p><ul class="v-wins">${approved.map(q=>`<li class="v-win"><p class="v-win-h">${escapeHtml(q.win.trim())}</p>${typeof q.quote==="string"&&q.quote.trim()?`<blockquote class="v-bubble"><p>${escapeHtml(q.quote.trim())}</p><span>${who(q)}</span></blockquote>`:`<p class="v-win-who">${who(q)}, ${escapeHtml(q.said||"on WhatsApp")}</p>`}</li>`).join("")}</ul></div></section>`;
 }
 function chatHtml(){
