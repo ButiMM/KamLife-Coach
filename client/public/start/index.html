@@ -85,17 +85,24 @@ body[data-screen=landing] .footer{max-width:640px;margin:0 auto;padding:36px max
  .v-top{grid-column:1;grid-row:1;padding:32px 48px 0}.v-tag{display:none}
  .v-hero-foot{grid-column:1;grid-row:2;align-self:center;margin:0;padding:0 48px 64px;max-width:620px}
 }
-/* Results: one transformation per screen, edge to edge on a phone. */
-.v-intro{padding-bottom:28px}
-.v-results{display:grid;gap:34px;padding-bottom:40px}
-.v-res{margin:0 auto;width:100%;max-width:560px}
-.v-res-frame{overflow:hidden;background:#e7e3dc;aspect-ratio:9/16}
+/* Results: one dark, continuous gallery. Photos run edge to edge on a phone with a hairline between them,
+   Before / After sit on the photo itself, so there are no white strips. Three across on a computer. */
+.v-night{background:var(--night)}.v-night .v-h{color:#fff}.v-night p{color:#c3ccdb}
+.v-intro{padding-bottom:30px}
+.v-results{display:grid;gap:4px;padding-bottom:4px;background:var(--night)}
+.v-res{position:relative;margin:0;width:100%}
+.v-res-frame{overflow:hidden;aspect-ratio:9/16;background:#16213a}
 .v-res-frame img,.v-res-frame video{display:block;width:100%;height:100%;object-fit:cover}
-.v-res-cap{display:flex;padding:12px max(22px,env(safe-area-inset-left,0px)) 0;font-size:14px;color:var(--muted)}
+.v-res-cap{position:absolute;left:0;right:0;bottom:0;display:flex;padding:56px 18px 14px;font-size:14px;font-weight:600;color:#fff;background:linear-gradient(0deg,rgba(11,20,38,.78),rgba(11,20,38,0));pointer-events:none}
 .v-res-cap span{flex:1}
 .v-motion .v-res-frame>*{transform:scale(1.07);transition:transform 1.3s cubic-bezier(.2,0,0,1)}
 .v-motion .v-res.in .v-res-frame>*{transform:none}
-@media(min-width:620px){.v-res-frame{border-radius:28px}.v-res-cap{padding-inline:6px}}
+@media(min-width:760px){.v-results{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 max(24px,env(safe-area-inset-right,0px)) 8px max(24px,env(safe-area-inset-left,0px))}.v-res-frame{border-radius:14px}}
+/* Training hard: the gym clip behind the words. */
+.v-also{position:relative;isolation:isolate;overflow:hidden;background:var(--night);color:#fff;padding-block:110px}
+.v-also-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2;opacity:.55}
+.v-also:after{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(11,20,38,.75),rgba(11,20,38,.55) 40%,rgba(11,20,38,.9))}
+.v-also .v-h{color:#fff}.v-also p{color:#dfe5ef}
 .v-also .v-btn,.v-price .v-btn{margin-top:30px}
 /* Client wins in their own words. */
 .v-wins{list-style:none;margin:36px 0 0;padding:0;display:grid;gap:34px}
