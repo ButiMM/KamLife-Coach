@@ -30,6 +30,7 @@ const payHtml = readFileSync("client/public/pay/index.html", "utf8");
 check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
 check("the first screen has one start button and every start button opens question 1 (22 Nov rebuild: every start button says Start on WhatsApp)", /for\(const id of \["begin","begin2","begin3","begin4"\]\)\{const b=document\.getElementById\(id\);if\(b\)b\.onclick=\(\)=>visit\("goal"\);\}/.test(startJs) && !/data-goal=/.test(startJs) && (startJs.match(/startBtn\("begin"/g)||[]).length===1 && (startJs.match(/startBtn\("begin\d?","Start on WhatsApp"/g)||[]).length===4);
 check("R250 is kept for everyone who joins by 31 December (founder, 22 Nov); R450 is for new clients from January", startJs.includes("Join by 31 December to keep R250") && payHtml.includes("Join by 31 December to keep R250") && !startJs.includes("30 November") && !payHtml.includes("30 November"));
+check("a starter who is offered \"Message the coach\" also gets the About-you screen, so her WhatsApp message says who she is (22 Nov: 16 of 140 test paths arrived without name or place)", /function needsAbout\(r\)\{return \["FIT_OPEN","FIT_FULL"\]\.includes\(r\.outcome\)\|\|\(r\.outcome==="STARTER"&&!!r\.door\);\}/.test(startJs) && startJs.includes("needsAbout(routeAnswers(answers,spotsOpen))"));
 check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
 
 // kamlife.co.za opens on the /start page, not the Coach K app.
