@@ -28,7 +28,8 @@ const { readFileSync } = await import("node:fs");
 const startJs = readFileSync("client/public/start/app.js", "utf8");
 const payHtml = readFileSync("client/public/pay/index.html", "utf8");
 check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
-check("the hero asks the first question itself: tapping a goal counts as started and goes to question 2 (20 Nov: 26 of 27 visitors left before starting)", /data-goal=/.test(startJs) && /answers\.goal=b\.dataset\.goal;count\("q1"\);visit\(QUESTIONS\[1\]\.key\)/.test(startJs));
+check("the first screen has one start button and every start button opens question 1 (22 Nov rebuild: every start button says Start on WhatsApp)", /for\(const id of \["begin","begin2","begin3","begin4"\]\)\{const b=document\.getElementById\(id\);if\(b\)b\.onclick=\(\)=>visit\("goal"\);\}/.test(startJs) && !/data-goal=/.test(startJs) && (startJs.match(/startBtn\("begin"/g)||[]).length===1 && (startJs.match(/startBtn\("begin\d?","Start on WhatsApp"/g)||[]).length===4);
+check("R250 is kept for everyone who joins by 31 December (founder, 22 Nov); R450 is for new clients from January", startJs.includes("Join by 31 December to keep R250") && payHtml.includes("Join by 31 December to keep R250") && !startJs.includes("30 November") && !payHtml.includes("30 November"));
 check("the pay page carries the same brand line as the start page", payHtml.includes("Real people. Real life. Real progress.") && !payHtml.includes("Accountability"));
 
 // kamlife.co.za opens on the /start page, not the Coach K app.
