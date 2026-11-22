@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#0f1b33">
-<title>KamLife · Your programme</title>
+<title>KamLife, your programme</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=Instrument+Serif&display=swap">
 <style>
 :root{--navy:#0f1b33;--orange:#ff6a1a;--paper:#ffffff;--muted:#5d6676;--line:#e3ddd3;--green:#1fa855}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--navy);font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.55}
@@ -31,6 +31,20 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--orange);outline-off
 .watch{grid-column:2;grid-row:1 / span 2;font-size:13px;font-weight:600;color:var(--green);text-decoration:none;border:1.5px solid var(--green);border-radius:999px;padding:7px 12px;white-space:nowrap}
 .walk{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line);font-weight:600;font-size:14px}
 footer{max-width:640px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:12px;line-height:1.7}
+/* Plan page in the same look as the website (22 Nov 2026). */
+:root{--night:#0b1426;--stone:#efebe5;--serif:"Instrument Serif",Georgia,"Times New Roman",serif}
+body{background:var(--stone)}
+header{background:var(--night)}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.045em}
+h1{font:400 clamp(48px,13vw,66px)/.98 var(--serif)!important;letter-spacing:-.01em!important}
+.lead{font-size:17px}
+[data-group] button{background:#fff;border-color:#fff;box-shadow:0 1px 0 #d9d3c9}
+[data-group] button[aria-pressed=true]{background:var(--navy);border-color:var(--navy)}
+.rules{background:var(--navy);border:0;border-radius:20px;color:#dfe5ef;padding:18px 20px}
+.day{border:0;border-radius:22px;box-shadow:0 18px 40px -28px rgba(15,27,51,.5);padding:22px 20px}
+.day h2{font:400 30px/1.05 var(--serif)!important;letter-spacing:0!important;margin-bottom:14px}
+.watch{color:var(--orange);border-color:var(--orange)}
+.walk{color:var(--navy)}
 </style>
 </head>
 <body>
