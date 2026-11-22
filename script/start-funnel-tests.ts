@@ -27,6 +27,10 @@ check("an oversized body is dropped", parseFunnelEvent(JSON.stringify({ step: "l
 const { readFileSync } = await import("node:fs");
 const startJs = readFileSync("client/public/start/app.js", "utf8");
 const payHtml = readFileSync("client/public/pay/index.html", "utf8");
+// 22 Nov: 8 results in rows of 3 left an empty dark hole on wide screens. A short row now gets a Start tile.
+check("a results row never leaves an empty hole on wide screens: a short row gets a Start tile that opens question 1",
+  /const miss=\(3-g\.length%3\)%3;return g\.map\(resultHtml\)\.join\(""\)\+\(miss\?nextTile\(miss\):""\)/.test(startJs)
+  && /querySelectorAll\("\.v-next \.v-btn"\)\)b\.onclick=\(\)=>visit\("goal"\)/.test(startJs));
 check("the start page no longer says billing is on the 1st", !startJs.includes("before the 1st"));
 check("the first screen has one start button and every start button opens question 1 (22 Nov rebuild: every start button says Start on WhatsApp)", /for\(const id of \["begin","begin2","begin3","begin4"\]\)\{const b=document\.getElementById\(id\);if\(b\)b\.onclick=\(\)=>visit\("goal"\);\}/.test(startJs) && !/data-goal=/.test(startJs) && (startJs.match(/startBtn\("begin"/g)||[]).length===1 && (startJs.match(/startBtn\("begin\d?","Start on WhatsApp"/g)||[]).length===4);
 check("R250 is kept for everyone who joins by 31 December (founder, 22 Nov); R450 is for new clients from January", startJs.includes("Join by 31 December to keep R250") && payHtml.includes("Join by 31 December to keep R250") && !startJs.includes("30 November") && !payHtml.includes("30 November"));
