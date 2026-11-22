@@ -40,8 +40,8 @@
 .step-label,#stepLabel,.next-title,.eyebrow{text-transform:none!important;letter-spacing:0!important;font-size:14px}
 .mast-note{display:none!important}
 /* KamLife start page (22 Nov 2026 rebuild). Designed as one page: client photos are the page, an elegant
-   serif for headlines and Archivo for reading, orange for every start button, green only on the final
-   WhatsApp tap. White, warm grey and navy sections alternate. One orchestrated motion moment (the hero
+   serif for headlines and Archivo for reading, orange as the brand accent, and every start button in
+   WhatsApp green with the WhatsApp icon. White, warm grey and navy sections alternate. One orchestrated motion moment (the hero
    photo pushes in slowly); results settle as you scroll to them. Reduced motion and data saver turn it off. */
 :root{--night:#0b1426;--stone:#efebe5;--serif:"Instrument Serif",Georgia,"Times New Roman",serif}
 html{font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -59,13 +59,13 @@ body[data-screen=landing] .footer{max-width:640px;margin:0 auto;padding:36px max
 .v-sec .v-h{font-size:clamp(44px,12vw,68px);margin-bottom:18px}
 .v-band{background:var(--navy);color:#fff}.v-band .v-h{color:#fff}.v-band p{color:#c3ccdb}
 .v-stone{background:var(--stone)}
-/* Start buttons: one shape and one colour everywhere before WhatsApp. */
-.v-btn,.lx-cta{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;max-width:420px;min-height:62px;padding:14px 14px 14px 24px;border:0;border-radius:999px;background:var(--orange);color:#fff;font:700 18px/1.2 Archivo,system-ui,sans-serif;text-align:left;cursor:pointer;transition:background .15s ease,transform .12s ease}
+/* Start buttons: WhatsApp green with the WhatsApp icon, so people know they land on WhatsApp. The green is
+   darkened from WhatsApp's #25D366 so white text stays readable. */
+.v-btn,.lx-cta{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;max-width:420px;min-height:62px;padding:12px 12px 12px 24px;border:0;border-radius:999px;background:#128c4a;color:#fff;font:700 18px/1.2 Archivo,system-ui,sans-serif;text-align:left;cursor:pointer;transition:background .15s ease,transform .12s ease}
 .v-btn small,.lx-cta small{display:block;font-weight:500;font-size:13px;opacity:.92;margin-top:3px}
-.v-btn i{flex:none;width:40px;height:40px;border-radius:50%;background:#fff;position:relative}
-.v-btn i:after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;border-top:2.5px solid var(--orange);border-right:2.5px solid var(--orange);transform:translate(-65%,-50%) rotate(45deg)}
-.v-btn:hover,.lx-cta:hover{background:#e95c10}.v-btn:active,.lx-cta:active{transform:scale(.98)}
-.v-btn:focus-visible,.lx-cta:focus-visible{outline:3px solid #fff;box-shadow:0 0 0 6px var(--orange);outline-offset:0}
+.v-btn i{flex:none;width:42px;height:42px;border-radius:50%;background:#fff;color:#128c4a;display:grid;place-items:center}
+.v-btn:hover,.lx-cta:hover{background:#0e7a40}.v-btn:active,.lx-cta:active{transform:scale(.98)}
+.v-btn:focus-visible,.lx-cta:focus-visible{outline:3px solid #fff;box-shadow:0 0 0 6px #128c4a;outline-offset:0}
 /* Hero: one client transformation, full screen, the line and the button over it. */
 .v-hero{position:relative;isolation:isolate;min-height:100svh;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;background:var(--night);color:#fff}
 .v-hero-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 22%;z-index:-2}
@@ -147,7 +147,7 @@ body[data-screen=landing] .footer{max-width:640px;margin:0 auto;padding:36px max
 .v-faq details p{margin:0 0 20px;font-size:16px;max-width:none}
 /* Sticky start bar on phones, once the hero has scrolled away. */
 .v-sticky{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:10px max(14px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));background:linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.96) 32%)}
-.v-sticky .v-btn{margin:0 auto;min-height:56px;box-shadow:0 12px 30px -10px rgba(226,86,12,.6)}
+.v-sticky .v-btn{margin:0 auto;min-height:56px;box-shadow:0 12px 30px -10px rgba(18,140,74,.55)}
 @media(min-width:900px){.v-sticky{display:none}}
 @media(prefers-reduced-motion:reduce){.v-motion .v-res-frame>*{transform:none;transition:none}.v-btn,.lx-cta{transition:none}}
 .v-hero-img{animation:v-push 16s cubic-bezier(.4,0,.2,1) both}
