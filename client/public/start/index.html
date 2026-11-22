@@ -155,6 +155,8 @@ body[data-screen=landing] .footer{max-width:640px;margin:0 auto;padding:36px max
 @keyframes v-push{from{transform:scale(1.08)}to{transform:none}}
 @keyframes v-rise{from{opacity:0;transform:translateY(18px)}}
 @media(prefers-reduced-motion:reduce){.v-hero-img,.v-hero-foot{animation:none}}
+/* Question and result screens use the same headline face as the landing. */
+.screen:not(.landing) h1{font:400 clamp(38px,10vw,52px)/1.02 var(--serif);letter-spacing:-.01em;color:var(--navy)}
 </style>
 </head>
 <body>
