@@ -8,10 +8,10 @@
 <meta name="theme-color" content="#0f1b33">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Welcome to KamLife 🧡</title>
-<meta name="description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app.">
+<meta name="description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app, or by card.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Welcome to KamLife 🧡">
-<meta property="og:description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app.">
+<meta property="og:description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app, or by card.">
 <meta property="og:url" content="https://kamlife-coach-production.up.railway.app/pay">
 <meta property="og:image" content="https://kamlife-coach-production.up.railway.app/start/kamlife-preview.png">
 <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="KamLife. Coaching on WhatsApp. Real people. Real life. Real progress.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Welcome to KamLife 🧡">
-<meta name="twitter:description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app.">
+<meta name="twitter:description" content="Your KamLife coaching payment details. Pay by EFT from your own banking app, or by card.">
 <meta name="twitter:image" content="https://kamlife-coach-production.up.railway.app/start/kamlife-preview.png">
 <script src="app.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,6 +49,8 @@ html,body{background:var(--stone)}
 #proofLink:after{content:"";flex:none;width:42px;height:42px;border-radius:50%;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23128c4a' d='M16 3.2C8.9 3.2 3.2 8.9 3.2 16c0 2.3.6 4.5 1.7 6.4L3.1 28.9l6.7-1.8c1.9 1 4 1.6 6.2 1.6 7.1 0 12.8-5.7 12.8-12.8S23.1 3.2 16 3.2zm0 23.3c-2 0-3.9-.5-5.6-1.5l-.4-.2-4 1.1 1.1-3.9-.3-.4c-1.1-1.7-1.7-3.7-1.7-5.7 0-5.9 4.8-10.6 10.7-10.6S26.6 10 26.6 16 21.9 26.5 16 26.5zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-1 1.2-.2.2-.4.2-.7.1-.3-.2-1.4-.5-2.6-1.6-1-.9-1.6-1.9-1.8-2.2-.2-.3 0-.5.1-.7l.5-.6c.2-.2.2-.4.3-.6.1-.2 0-.4 0-.6-.1-.2-.7-1.7-1-2.3-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4-.3.3-1.1 1.1-1.1 2.7s1.2 3.1 1.3 3.3c.2.2 2.3 3.5 5.5 4.9.8.3 1.4.5 1.8.7.8.2 1.5.2 2 .1.6-.1 1.9-.8 2.1-1.5.3-.7.3-1.4.2-1.5-.1-.2-.3-.3-.6-.4z'/%3E%3C/svg%3E") center/22px no-repeat}
 #proofLink:hover{background:#0e7a40}
 .trust{border-left:3px solid var(--orange);padding-left:12px}
+.card-pay{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px 20px;margin:24px 0}.card-pay h2{font-size:22px;letter-spacing:-.4px;margin:0 0 10px}.card-pay p{font-size:14px;margin:0 0 16px}.card-pay-links{display:grid;gap:10px}.card-pay-link{display:flex;align-items:center;justify-content:center;min-height:56px;border-radius:13px;background:var(--navy);color:#fff;text-decoration:none;font-weight:750;font-size:15px}.card-pay-link:hover{background:#233653}@media(min-width:520px){.card-pay-links{grid-template-columns:1fr 1fr}}
+
 </style>
 </head>
 <body>
@@ -62,6 +64,7 @@ html,body{background:var(--stone)}
 <p class="bank-status" id="bankCopyStatus" role="status" aria-live="polite"></p>
 <p><strong>No need to send proof.</strong> I see your payment come in and start your coaching. Just use your cell number as the reference so I know it's you.</p>
 <div class="payment-offer"><p><strong>Best value: R700 for your first 90 days.</strong> That’s 3 months in one payment.</p><p>Join by 31 December to keep R250 a month. From January, new clients pay R450.</p></div>
+<section class="card-pay" aria-labelledby="cardPayTitle"><h2 id="cardPayTitle">Rather pay by card?</h2><p>Any Visa or Mastercard works, from South Africa or outside it. Your bank converts it automatically. Pay with <strong>Card</strong>, not the bank-app or QR option.</p><div class="card-pay-links"><a class="card-pay-link" id="cardMonth" href="https://paystack.shop/pay/kamlife-coaching" rel="noopener noreferrer">R250 for one month</a><a class="card-pay-link" id="card90" href="https://paystack.shop/pay/kamlife-90-days" rel="noopener noreferrer">R700 for 90 days</a></div><p class="caption">Secure card payment by Paystack. A prepaid card needs enough loaded on it first.</p></section>
 <p class="sub">Not for you? Tell me within 7 days of paying and I’ll refund you in full.</p>
 <p class="sub">Bring a friend: when she joins, you get R50 off your next month.</p>
 <a id="proofLink" class="whatsapp" href="https://api.whatsapp.com/send?phone=27658829664&amp;text=Hi%20Coach%2C%20I%27ve%20just%20paid%20%F0%9F%A7%A1" rel="noopener noreferrer">Tell me you’ve paid</a>
