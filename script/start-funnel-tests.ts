@@ -154,6 +154,8 @@ check("the landing page and share preview welcome people who are just starting",
 {
   const payJs = readFileSync("client/public/pay/app.js", "utf8");
   check("the pay page account name is KamLife (Pty) Ltd", /const ACCOUNT_NAME = "KamLife \(Pty\) Ltd";/.test(payJs));
+    // 23 Nov: a client in Ghana could only find EFT on the pay page. Card payment links (Paystack) now sit on it.
+  check("the pay page offers card payment (R250 month and R700 90 days) for clients who can't do an SA EFT", (()=>{const h=readFileSync("client/public/pay/index.html","utf8");return h.includes('href="https://paystack.shop/pay/kamlife-coaching"')&&h.includes('href="https://paystack.shop/pay/kamlife-90-days"');})());
   check("the pay reference fits a bank app (cell number, not name and number)", /Payment reference: <strong>your cell number<\/strong>/.test(readFileSync("client/public/pay/index.html", "utf8")));
   check("the pay page account number and branch are the company's", /const ACCOUNT_NUMBER = "63222881525";/.test(payJs) && /const BRANCH_CODE = "250655";/.test(payJs) && /const BANK = "FNB \/ RMB";/.test(payJs));
   const pages = startJs + payJs + payHtml + readFileSync("client/public/start/index.html", "utf8");
