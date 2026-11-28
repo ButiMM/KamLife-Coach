@@ -146,6 +146,14 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   check(`every plan page exercise has a video${noVideo.length ? ` (missing: ${noVideo.slice(0, 3).join("; ")})` : ""}`, noVideo.length === 0);
 }
 
+// 28 Nov: the site promised "90 days to make it stick" and said "EFT only" while the pay page takes cards.
+// No page may promise a timeline of results, and none may say payment is EFT only.
+{
+  const pages = ["client/public/start/app.js", "client/public/start/index.html", "client/public/pay/index.html"].map(f => readFileSync(f, "utf8")).join("\n");
+  check("no page promises results in a set time or says payment is EFT only",
+    !/days to make it stick|Give it 90 days|about 12 weeks|at least 3 months|for the whole 90 days|EFT only|only ever by EFT/i.test(pages));
+}
+
 // Since 14 Nov people not training yet can reach the coach, so the page and its share preview must not say it's only for people already training.
 check("the landing page and share preview welcome people who are just starting",
   !/coaching for people already training|You’re training\.<br>|content="Already training|content="For people already training/.test(startJs + readFileSync("client/public/start/index.html", "utf8")));
