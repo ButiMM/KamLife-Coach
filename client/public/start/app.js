@@ -46,14 +46,17 @@ function routeAnswers(a,spotsOpen){
  // Flood mode only: when OPEN_TO_STARTERS is false these profiles get the free starter instead of coach contact.
  if(notYetConsistent&&!OPEN_TO_STARTERS)return {outcome:"STARTER",grade:null};
  // "Just exploring" is context, not a rejection: their message tells the coach they are still exploring.
- if(["trainonly","no"].includes(a.commit))return {outcome:"NOT_READY",grade:null};
+ // 28 Nov (founder): everyone who wants to start reaches the coach. Only "not ready to make changes" is not routed to him.
+ if(a.commit==="no")return {outcome:"NOT_READY",grade:null};
  // Goal and perceived cause are context, never rejection criteria.
  // Regular home/gym trainees can still qualify when they need consistency support.
  // A/B are context tags only; both receive exactly the same contact route.
  // Not training consistently yet: the free starter and the Channel come first; the committed can still
  // choose to message the coach (tagged C) while spots are open. Nobody is turned away.
- if(notYetConsistent)return {outcome:"STARTER",grade:"C",door:spotsOpen};
- const grade=a.commit==="ready"&&["gym","home"].includes(a.train)?"A":"B";
+ // Not training yet, or on and off: they message the coach like everyone else (tag C tells him where they're starting from).
+ if(notYetConsistent)return {outcome:spotsOpen?"FIT_OPEN":"FIT_FULL",grade:"C"};
+ // Workout plan only: still to the coach (tag T), who can talk food through with them.
+ const grade=a.commit==="trainonly"?"T":a.commit==="ready"&&["gym","home"].includes(a.train)?"A":"B";
  return {outcome:spotsOpen?"FIT_OPEN":"FIT_FULL",grade};
 }
 function firstName(raw){const word=String(raw).trim().split(/\s+/u)[0]||"";const safe=Array.from(word.replace(/[^\p{L}\p{M}'’-]/gu,"")).slice(0,40).join("");return safe?safe.charAt(0).toLocaleUpperCase("en-ZA")+safe.slice(1):"";}

@@ -100,6 +100,10 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   // and is told her doctor stays in charge of the medication.
   const onMeds = { ...explorer, start: "now", med: "managed" };
   const medOpt = page.QUESTIONS.find((q: any) => q.key === "med").options.find((o: any) => o[0] === "managed")[1];
+  // 28 Nov (founder): anyone who wants to start reaches the coach: someone not training yet, and someone who only wants a workout plan.
+  const base = { goal: "weight", need: "food", start: "now", med: "none" };
+  const newbie = page.routeAnswers({ ...base, train: "none", commit: "ready" }, true), planOnly = page.routeAnswers({ ...base, train: "gym", commit: "trainonly" }, true);
+  check("someone not training yet, and someone who only wants a workout plan, both get the WhatsApp to the coach", newbie.outcome === "FIT_OPEN" && planOnly.outcome === "FIT_OPEN" && page.routeAnswers({ ...base, train: "gym", commit: "no" }, true).outcome === "NOT_READY");
   const medR = page.routeAnswers(onMeds, true);
   check("someone on weight-loss medication from her doctor reaches the coach with her doctor kept in charge",
     /weight-loss medication/.test(medOpt) && medR.outcome === "FIT_OPEN" && page.renderOutcome(medR, onMeds).includes("Keep your doctor in the loop"));
