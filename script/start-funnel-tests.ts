@@ -146,6 +146,34 @@ check("a Channel tap is counted", parseFunnelEvent({ step: "channel", outcome: "
   check(`every plan page exercise has a video${noVideo.length ? ` (missing: ${noVideo.slice(0, 3).join("; ")})` : ""}`, noVideo.length === 0);
 }
 
+// 28 Nov: the "men" programme trained legs one day a week and the "women" one trained upper body one day a week.
+// Every programme (2, 3 or 4 days, any setup) must train every major muscle on at least 2 days a week.
+{
+  const w: any = {};
+  new Function("window", readFileSync("client/public/plan/programmes.js", "utf8"))(w);
+  const M: [RegExp, string[]][] = [[/Chest Press|Floor Press/, ["chest", "triceps"]], [/Pec|Fly/, ["chest"]], [/Upright Row/, ["shoulders"]],
+    [/Pulldown|(?<!Upright )Row/, ["back", "biceps"]], [/Shoulder Press/, ["shoulders", "triceps"]], [/Lateral/, ["shoulders"]], [/Triceps/, ["triceps"]],
+    [/Biceps/, ["biceps"]], [/Leg Press|Hack|Goblet|Bulgarian|Lunge/, ["quads", "glutes"]], [/Leg Extension/, ["quads"]],
+    [/Romanian|Hip Thrust|Pull Through/, ["hamstrings", "glutes"]], [/Leg Curl/, ["hamstrings"]], [/Calf/, ["calves"]]];
+  const NEED = ["chest", "back", "shoulders", "triceps", "biceps", "quads", "hamstrings", "glutes", "calves"];
+  const short: string[] = [];
+  const P = w.KAMLIFE_PROGRAMMES as Record<string, string>;
+  for (const setup of ["gym", "multi", "db"]) for (const days of [2, 3, 4]) {
+    const text = P[`${setup}-${days}`];
+    if (!text) { short.push(`${setup}-${days} missing`); continue; }
+    const dayBlocks = text.split("✅ DAY").slice(1);
+    if (dayBlocks.length !== days) short.push(`${setup}-${days} has ${dayBlocks.length} days`);
+    const n: Record<string, number> = Object.fromEntries(NEED.map(m => [m, 0]));
+    for (const d of dayBlocks) {
+      const hit = new Set<string>();
+      for (const ex of d.split("\n").filter(l => /^\d️⃣/u.test(l))) for (const [re, ms] of M) if (re.test(ex)) ms.forEach(m => hit.add(m));
+      hit.forEach(m => n[m]++);
+    }
+    for (const m of NEED) if (n[m] < 2) short.push(`${setup}-${days}: ${m} on ${n[m]} day(s)`);
+  }
+  check(`every programme trains every muscle at least twice a week${short.length ? ` (${short.slice(0, 4).join("; ")})` : ""}`, short.length === 0);
+}
+
 // Since 14 Nov people not training yet can reach the coach, so the page and its share preview must not say it's only for people already training.
 check("the landing page and share preview welcome people who are just starting",
   !/coaching for people already training|You’re training\.<br>|content="Already training|content="For people already training/.test(startJs + readFileSync("client/public/start/index.html", "utf8")));
