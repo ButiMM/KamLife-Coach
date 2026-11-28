@@ -1,8 +1,7 @@
 "use strict";
-// Client picks who they are, where they train and how many days: the matching standard programme shows.
+// Client picks where they train and how many days a week: that programme shows, every day of it.
 const P = window.KAMLIFE_PROGRAMMES || {};
-const state = { who: "", where: "", days: "" };
-const KEY = { "w|gym": "w-gym", "m|gym": "m-gym", "w|db": "w-db", "m|db": "m-db", "w|multi": "multi", "m|multi": "multi", "w|none": "none", "m|none": "none" };
+const state = { where: "", days: "" };
 function parse(text) {
   const lines = text.split("\n"); const head = []; const days = []; let cur = null;
   for (const raw of lines) {
@@ -17,12 +16,12 @@ function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.
 function render() {
   const out = document.getElementById("programme"); out.textContent = "";
   for (const g of document.querySelectorAll("[data-group]")) for (const b of g.querySelectorAll("button")) b.setAttribute("aria-pressed", String(state[g.dataset.group] === b.value));
-  if (!state.who || !state.where || !state.days) { out.appendChild(el("p", "hint", "Choose all three and your programme shows here.")); return; }
-  const text = P[KEY[state.who + "|" + state.where]]; if (!text) return;
-  const n = Number(state.days); const { head, days } = parse(text);
-  const rules = head.filter(l => /^(Sets|Reps|Rest|Cardio|When|Goal)/.test(l));
+  if (!state.where || !state.days) { out.appendChild(el("p", "hint", "Choose both and your programme shows here.")); return; }
+  const text = P[state.where + "-" + state.days]; if (!text) return;
+  const { head, days } = parse(text);
+  const rules = head.filter(l => /^(Sets|Reps|Rest|Cardio|When|Days)/.test(l));
   const box = el("div", "rules"); for (const r of rules) box.appendChild(el("p", "", r)); out.appendChild(box);
-  days.slice(0, n).forEach((d, i) => {
+  days.forEach((d, i) => {
     const card = el("section", "day"); card.appendChild(el("h2", "", "Day " + (i + 1) + " · " + d.title.replace(/^DAY \d+\s*[–-]\s*/, "")));
     let item = null;
     for (const l of d.lines) {
